@@ -216,6 +216,10 @@ ask_default() {
 
 SECRETS_MADE=()
 
+# Temp files (one briefly holds a secret) are removed even on Ctrl-C or abort.
+_TMPS=()
+trap 'rm -f "${_TMPS[@]}"' EXIT
+
 # put_secret NAME VALUE: create the engines-* secret if missing, add a new
 # version only when the value changed, and let engines-runtime read it.
 put_secret() {
@@ -235,7 +239,7 @@ put_secret() {
     if [[ "$current" == "$value" ]]; then
       note "$name already holds this value"
     else
-      tmp=$(mktemp); chmod 600 "$tmp"; printf '%s' "$value" > "$tmp"
+      tmp=$(mktemp); _TMPS+=("$tmp"); chmod 600 "$tmp"; printf '%s' "$value" > "$tmp"
       if ! gc secrets versions add "$name" --project="$PROJECT" --data-file="$(winpath "$tmp")" >/dev/null; then
         rm -f "$tmp"; return 1
       fi
@@ -243,6 +247,7 @@ put_secret() {
       printf '  %s✓ stored%s %s in Secret Manager\n' "$GREEN" "$RESET" "$name"
     fi
   fi
+  gc secrets update "$name" --project="$PROJECT" --update-labels=service=engines >/dev/null
   gc secrets add-iam-policy-binding "$name" --project="$PROJECT" \
     --member="serviceAccount:$SA_EMAIL" --role=roles/secretmanager.secretAccessor >/dev/null
   SECRETS_MADE+=("$name")
@@ -250,9 +255,10 @@ put_secret() {
 
 # sql_wait INSTANCE: block until no admin operation is running on it.
 sql_wait() {
-  local op
-  for op in $(gc sql operations list --instance="$1" --project="$PROJECT" \
-                --filter="status!=DONE" --format="value(name)"); do
+  local op ops
+  ops=$(gc sql operations list --instance="$1" --project="$PROJECT" \
+          --filter="status!=DONE" --format="value(name)")
+  for op in $ops; do
     gc sql operations wait "$op" --project="$PROJECT" --timeout=unlimited >/dev/null
   done
 }
@@ -340,16 +346,13 @@ REGION="$GCP_REGION"
 ask_default PG_VERSION "Postgres version" "POSTGRES_17"
 ask_default SQL_TIER "Cloud SQL machine tier (shared-core, cheapest)" "db-f1-micro"
 [[ -n "$PROJECT" ]] || { warn "no project ID"; exit 1; }
-BILLING_ACCOUNT=$(gc billing projects describe "$PROJECT" --format="value(billingAccountName)")
-BILLING_ACCOUNT="${BILLING_ACCOUNT#billingAccounts/}"
-[[ -n "$BILLING_ACCOUNT" ]] || { warn "billing is not enabled on $PROJECT"; exit 1; }
 SA_EMAIL="engines-runtime@$PROJECT.iam.gserviceaccount.com"
 PROD_DB=engines-prod-db
 DEV_DB=engines-dev-db
 BUCKETS=(engines-uploads engines-pages engines-results)
 note "Engines creates only new engines-* resources. It never touches almahdi-db,"
 note "Almahdi's buckets or Almahdi's secrets."
-confirm "Set up Engines in project $PROJECT (billing account $BILLING_ACCOUNT)?" || exit 1
+confirm "Set up Engines in project $PROJECT?" || exit 1
 write_env GCP_PROJECT_ID "$PROJECT"
 write_env GCP_REGION "$REGION"
 write_env PG_VERSION "$PG_VERSION"
@@ -359,6 +362,10 @@ gc services enable sqladmin.googleapis.com storage.googleapis.com secretmanager.
   iam.googleapis.com cloudresourcemanager.googleapis.com cloudbilling.googleapis.com \
   billingbudgets.googleapis.com aiplatform.googleapis.com --project="$PROJECT"
 printf '  %s✓ APIs enabled%s\n' "$GREEN" "$RESET"
+BILLING_ACCOUNT=$(gc billing projects describe "$PROJECT" --format="value(billingAccountName)")
+BILLING_ACCOUNT="${BILLING_ACCOUNT#billingAccounts/}"
+[[ -n "$BILLING_ACCOUNT" ]] || { warn "billing is not enabled on $PROJECT"; exit 1; }
+say "Billing account: $BILLING_ACCOUNT"
 pause
 
 # ── 2 ─────────────────────────────────────────────────────────────────────
@@ -420,7 +427,7 @@ for bucket in "${BUCKETS[@]}"; do
       --default-storage-class=STANDARD --uniform-bucket-level-access --public-access-prevention >/dev/null
     printf '  %s✓ created%s gs://%s\n' "$GREEN" "$RESET" "$bucket"
   fi
-  rules=$(mktemp)
+  rules=$(mktemp); _TMPS+=("$rules")
   printf '{"rule":[{"action":{"type":"Delete"},"condition":{"age":%s}}]}' "$age" > "$rules"
   gc storage buckets update "gs://$bucket" --project="$PROJECT" \
     --lifecycle-file="$(winpath "$rules")" --update-labels=service=engines >/dev/null
@@ -481,17 +488,20 @@ pause
 
 # ── 11 ────────────────────────────────────────────────────────────────────
 stage "Monthly budget alert for service=engines"
-CURRENCY=$(gc billing accounts describe "$BILLING_ACCOUNT" --format="value(currencyCode)" 2>/dev/null || true)
+# --billing-project: bill API quota to $PROJECT, where billingbudgets is enabled.
+CURRENCY=$(gc billing accounts describe "$BILLING_ACCOUNT" --billing-project="$PROJECT" \
+             --format="value(currencyCode)" 2>/dev/null || true)
 CURRENCY="${CURRENCY:-USD}"
 say "Covers Google Cloud spend on everything labelled service=engines. OpenRouter"
 say "spend is capped separately by the key limits you just set."
-budgets=$(gc billing budgets list --billing-account="$BILLING_ACCOUNT" --format="value(displayName)")
+budgets=$(gc billing budgets list --billing-account="$BILLING_ACCOUNT" --billing-project="$PROJECT" \
+            --format="value(displayName)")
 if grep -qx engines-monthly <<<"$budgets"; then
   note "budget engines-monthly already exists"
 else
   ask_default BUDGET_AMOUNT "Monthly budget in $CURRENCY" "50"
   write_env BUDGET_AMOUNT "$BUDGET_AMOUNT"
-  gc billing budgets create --billing-account="$BILLING_ACCOUNT" \
+  gc billing budgets create --billing-account="$BILLING_ACCOUNT" --billing-project="$PROJECT" \
     --display-name=engines-monthly --budget-amount="$BUDGET_AMOUNT" \
     --calendar-period=month --filter-projects="projects/$PROJECT" \
     --filter-labels=service=engines \
@@ -506,29 +516,38 @@ pause
 # ── 12 ────────────────────────────────────────────────────────────────────
 stage "Check: engines-runtime has no role on Almahdi resources"
 LEAKS=()
+UNCHECKED=()
 say "Project-level roles held by engines-runtime:"
 gc projects get-iam-policy "$PROJECT" --flatten=bindings \
   --filter="bindings.members:serviceAccount:$SA_EMAIL" \
   --format="table(bindings.role,bindings.condition.title)" | sed 's/^/    /'
-unconditioned=$(gc projects get-iam-policy "$PROJECT" --flatten=bindings \
+# The one allowed project-level grant is cloudsql.client under engines-sql-only.
+unexpected=$(gc projects get-iam-policy "$PROJECT" --flatten=bindings \
   --filter="bindings.members:serviceAccount:$SA_EMAIL" \
-  --format="csv[no-heading](bindings.role,bindings.condition.title)" | awk -F, '$2 == "" { print $1 }')
-if [[ -n "$unconditioned" ]]; then LEAKS+=("project-wide role without a condition: $unconditioned"); fi
-for bucket in $(gc storage buckets list --project="$PROJECT" --format="value(name)"); do
+  --format="csv[no-heading](bindings.role,bindings.condition.title)" \
+  | awk -F, '!($1 == "roles/cloudsql.client" && $2 == "engines-sql-only") { print $1 " (" ($2 == "" ? "no condition" : $2) ")" }')
+if [[ -n "$unexpected" ]]; then LEAKS+=("project-level: $unexpected"); fi
+bucket_list=$(gc storage buckets list --project="$PROJECT" --format="value(name)")
+for bucket in $bucket_list; do
   [[ "$bucket" == engines-* ]] && continue
-  policy=$(gc storage buckets get-iam-policy "gs://$bucket" --format=json)
-  if grep -qF "$SA_EMAIL" <<<"$policy"; then
-    LEAKS+=("bucket gs://$bucket")
+  if ! policy=$(gc storage buckets get-iam-policy "gs://$bucket" --format=json 2>/dev/null); then
+    UNCHECKED+=("bucket gs://$bucket"); continue
   fi
+  if grep -qF "$SA_EMAIL" <<<"$policy"; then LEAKS+=("bucket gs://$bucket"); fi
 done
-for secret in $(gc secrets list --project="$PROJECT" --format="value(name)"); do
+secret_list=$(gc secrets list --project="$PROJECT" --format="value(name)")
+for secret in $secret_list; do
   secret="${secret##*/}"
   [[ "$secret" == engines-* ]] && continue
-  policy=$(gc secrets get-iam-policy "$secret" --project="$PROJECT" --format=json)
-  if grep -qF "$SA_EMAIL" <<<"$policy"; then
-    LEAKS+=("secret $secret")
+  if ! policy=$(gc secrets get-iam-policy "$secret" --project="$PROJECT" --format=json 2>/dev/null); then
+    UNCHECKED+=("secret $secret"); continue
   fi
+  if grep -qF "$SA_EMAIL" <<<"$policy"; then LEAKS+=("secret $secret"); fi
 done
+if (( ${#UNCHECKED[@]} )); then
+  warn "couldn't read the IAM policy of: ${UNCHECKED[*]}"
+  SKIPPED+=("check engines-runtime has no role on: ${UNCHECKED[*]}")
+fi
 if (( ${#LEAKS[@]} )); then
   warn "engines-runtime can reach Almahdi resources:"
   for l in "${LEAKS[@]}"; do note "  - $l"; done
@@ -553,7 +572,11 @@ mkdir -p "$(dirname "$RESOURCES_DOC")"
   printf '| Cloud SQL, dev | `%s` (connection `%s`) |\n' "$DEV_DB" "$DEV_CONN"
   printf '| Database / user | `engines` / `engines` on both servers |\n'
   printf '| Buckets | `gs://engines-uploads` (2 days), `gs://engines-pages` (30 days), `gs://engines-results` (30 days) |\n'
-  printf '| Secrets | %s |\n' "$(printf '`%s` ' "${SECRETS_MADE[@]}" | sed 's/ $//')"
+  if (( ${#SECRETS_MADE[@]} )); then
+    printf '| Secrets | %s |\n' "$(printf '`%s` ' "${SECRETS_MADE[@]}" | sed 's/ $//')"
+  else
+    printf '| Secrets | none stored this run |\n'
+  fi
   printf '| OAuth client ID | `%s` (redirect `%s`) |\n' "$GOOGLE_CLIENT_ID" "$OAUTH_REDIRECT"
   printf '| Budget | `engines-monthly`, filtered on `service=engines` |\n'
   printf '| Vertex AI | `aiplatform.googleapis.com` enabled, not used yet |\n\n'
