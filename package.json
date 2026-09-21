@@ -8,9 +8,9 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "start:api": "node src/api/main.ts",
-    "start:worker": "node src/worker/main.ts",
-    "migrate": "node src/shared/db/migrate-cli.ts",
+    "start:api": "node --env-file-if-exists=.env src/api/main.ts",
+    "start:worker": "node --env-file-if-exists=.env src/worker/main.ts",
+    "migrate": "node --env-file-if-exists=.env src/shared/db/migrate-cli.ts",
     "db:up": "docker compose up -d postgres",
     "typecheck": "tsc",
     "lint": "eslint .",
@@ -37,6 +37,10 @@
     "zod": "4.6.5"
   },
   "allowScripts": {
+    "@embedded-postgres/darwin-arm64@18.4.0-beta.17": true,
+    "@embedded-postgres/darwin-x64@18.4.0-beta.17": true,
+    "@embedded-postgres/linux-arm64@18.4.0-beta.17": true,
+    "@embedded-postgres/linux-x64@18.4.0-beta.17": true,
     "@embedded-postgres/windows-x64@18.4.0-beta.17": true
   }
 }

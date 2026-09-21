@@ -22,8 +22,13 @@ export async function globalSetup(): Promise<void> {
     persistent: false,
     onLog: () => undefined,
   });
-  await server.initialise();
-  await server.start();
+  try {
+    await server.initialise();
+    await server.start();
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true });
+    throw error;
+  }
   embedded = { server, dir };
 
   process.env["DATABASE_URL"] =

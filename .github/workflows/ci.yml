@@ -67,4 +67,17 @@ jobs:
           docker compose up -d --wait postgres
           docker compose run --rm migrate
           docker compose run --rm migrate
-          docker compose down -v
+
+      - name: the worker entry point starts and connects pg-boss
+        run: |
+          docker compose up -d worker
+          for _ in $(seq 1 30); do
+            if docker compose logs worker | grep -q "worker started"; then exit 0; fi
+            sleep 1
+          done
+          docker compose logs worker
+          exit 1
+
+      - name: tear down compose
+        if: always()
+        run: docker compose down -v
