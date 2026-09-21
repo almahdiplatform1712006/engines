@@ -12,6 +12,9 @@
     "start:worker": "node --env-file-if-exists=.env src/worker/main.ts",
     "migrate": "node --env-file-if-exists=.env src/shared/db/migrate-cli.ts",
     "db:up": "docker compose up -d postgres",
+    "golden:draft": "node --env-file-if-exists=.env src/golden/cli.ts draft",
+    "golden:sheet": "node src/golden/cli.ts sheet",
+    "golden:score": "node --env-file-if-exists=.env src/golden/cli.ts score",
     "typecheck": "tsc",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -31,6 +34,7 @@
   "dependencies": {
     "@hono/node-server": "2.1.1",
     "hono": "4.13.8",
+    "katex": "0.18.7",
     "node-pg-migrate": "9.0.0",
     "pg": "8.23.0",
     "pg-boss": "12.33.3",

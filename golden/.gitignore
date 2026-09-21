@@ -1,0 +1,15 @@
+# Book page images are copyright: they live in a private bucket or on local disk,
+# never in git. Only manifests, truth files and runs are committed.
+*/images/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.tif
+*.tiff
+*.gif
+*.bmp
+*.pdf
+
+# The correction sheet is generated locally and links the images above.
+*/sheet.html
