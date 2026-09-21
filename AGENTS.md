@@ -18,15 +18,17 @@ Also from the spec: the model name is config, never hard-coded at a call site. p
 
 ## Layout
 
-| Path             | What                                                                      |
-| ---------------- | ------------------------------------------------------------------------- |
-| `src/api/`       | HTTP service (Hono). `app.ts` builds the app, `main.ts` serves it         |
-| `src/worker/`    | pg-boss worker. `worker.ts` registers queues, `main.ts` runs it           |
-| `src/shared/`    | Config (Zod-parsed env), queue names, database migrations runner          |
-| `migrations/`    | SQL migrations (node-pg-migrate, `-- Up Migration` / `-- Down Migration`) |
-| `test/`          | Test harness: Postgres for database tests                                 |
-| `docs/research/` | Tooling research behind spec §5                                           |
-| `docs/agents/`   | How agents use the issue tracker, labels and domain docs                  |
+| Path             | What                                                                        |
+| ---------------- | --------------------------------------------------------------------------- |
+| `src/api/`       | HTTP service (Hono). `app.ts` builds the app, `main.ts` serves it           |
+| `src/worker/`    | pg-boss worker. `worker.ts` registers queues, `main.ts` runs it             |
+| `src/shared/`    | Config (Zod-parsed env), queue names, database migrations runner            |
+| `src/golden/`    | Golden-set tools: file formats, drafting, correction sheet, scorers         |
+| `golden/`        | Golden-set manifests, truth files and runs. Page images are never committed |
+| `migrations/`    | SQL migrations (node-pg-migrate, `-- Up Migration` / `-- Down Migration`)   |
+| `test/`          | Test harness: Postgres for database tests                                   |
+| `docs/research/` | Tooling research behind spec §5                                             |
+| `docs/agents/`   | How agents use the issue tracker, labels and domain docs                    |
 
 ## Stack
 
@@ -67,6 +69,18 @@ npm run start:worker
 ```
 
 Nothing here connects to any Google Cloud database.
+
+## Golden set
+
+Extraction quality is measured against hand-corrected pages. See `golden/README.md` for the format and workflow.
+
+```sh
+npm run golden:draft -- <book>   # reader drafts truth/<page>.json and writes sheet.html
+npm run golden:score             # score the current reader, write golden/runs/<run>.json
+npm run golden:score -- --compare golden/runs/<a>.json golden/runs/<b>.json
+```
+
+Book page images are copyright: never commit them.
 
 ## CI
 
