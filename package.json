@@ -1,0 +1,42 @@
+{
+  "name": "engines",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Engines: a teacher's own book in, questions and explanation out, filed under their syllabus tree.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start:api": "node src/api/main.ts",
+    "start:worker": "node src/worker/main.ts",
+    "migrate": "node src/shared/db/migrate-cli.ts",
+    "db:up": "docker compose up -d postgres",
+    "typecheck": "tsc",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --test --test-global-setup=test/global-setup.ts \"src/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.6",
+    "@types/pg": "8.23.1",
+    "embedded-postgres": "18.4.0-beta.17",
+    "eslint": "10.11.0",
+    "prettier": "3.9.8",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.1"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "hono": "4.13.8",
+    "node-pg-migrate": "9.0.0",
+    "pg": "8.23.0",
+    "pg-boss": "12.33.3",
+    "zod": "4.6.5"
+  },
+  "allowScripts": {
+    "@embedded-postgres/windows-x64@18.4.0-beta.17": true
+  }
+}

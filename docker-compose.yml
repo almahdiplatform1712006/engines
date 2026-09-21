@@ -1,0 +1,49 @@
+# Local development only. Nothing here talks to Google Cloud.
+# The credentials below belong to this throwaway local database and nothing else.
+x-app: &app
+  build: .
+  image: engines:local
+  environment:
+    DATABASE_URL: postgres://engines:engines@postgres:5432/engines
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: engines
+      POSTGRES_PASSWORD: engines
+      POSTGRES_DB: engines
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engines -d engines"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    <<: *app
+    command: ["node", "src/shared/db/migrate-cli.ts"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app
+    command: ["node", "src/worker/main.ts"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
