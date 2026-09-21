@@ -69,6 +69,22 @@ describe("writeCorrectionSheet", () => {
     assert.match(html, /a &lt; b &amp; c/);
   });
 
+  test("shows a broken truth file as it is, with the error, for the owner to fix", async () => {
+    await writeFile(
+      join(root, "physics-g10", "truth", "p012.json"),
+      '{ "status": "corrected", ',
+    );
+
+    const html = await readFile(
+      await writeCorrectionSheet(root, "physics-g10"),
+      "utf8",
+    );
+
+    assert.match(html, /data-status="invalid"/);
+    assert.match(html, /\{ &quot;status&quot;: &quot;corrected&quot;, </);
+    assert.match(html, /class="message error"[^>]*>[^<]*p012\.json/);
+  });
+
   test("gives an undrafted page an empty draft to fill in", async () => {
     const html = await readFile(
       await writeCorrectionSheet(root, "physics-g10"),

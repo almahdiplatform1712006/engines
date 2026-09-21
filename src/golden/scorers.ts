@@ -8,7 +8,7 @@ import type { CropBox, PageContent, Question, Usage } from "./truth.ts";
 /** Below this normalised-text similarity two items are not the same item. */
 const MATCH_THRESHOLD = 0.7;
 
-export interface Pair<T> {
+interface Pair<T> {
   truth: T;
   predicted: T;
 }
@@ -18,7 +18,7 @@ export interface Pair<T> {
  * pairs first, each item used at most once. Ids never line up between a truth
  * file and a reader's output, so text is the only fair key.
  */
-export function matchByText<T>(
+function matchByText<T>(
   truth: readonly T[],
   predicted: readonly T[],
   text: (item: T) => string,

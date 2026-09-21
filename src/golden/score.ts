@@ -3,7 +3,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { bookPaths, exists, loadManifest, loadTruth } from "./book.ts";
+import { loadManifest } from "./book.ts";
+import { readPage, truthFor } from "./pages.ts";
 import { add, EMPTY, type Ratio, value } from "./ratio.ts";
 import type { PageReader } from "./reader.ts";
 import {
@@ -18,7 +19,7 @@ import {
   questionRecall,
   stimulusLinkAccuracy,
 } from "./scorers.ts";
-import { PageContent, Usage } from "./truth.ts";
+import { PageContent, PageFailure, Usage } from "./truth.ts";
 
 interface Metric {
   label: string;
@@ -124,14 +125,7 @@ export const Run = z.object({
       reason: z.enum(["draft", "no_truth"]),
     }),
   ),
-  failures: z.array(
-    z.object({
-      book: z.string(),
-      page: z.string(),
-      reason: z.enum(["image_missing", "read_failed"]),
-      detail: z.string().optional(),
-    }),
-  ),
+  failures: z.array(PageFailure.extend({ book: z.string() })),
 });
 export type Run = z.infer<typeof Run>;
 
@@ -161,45 +155,38 @@ export async function scoreBooks({
   for (const book of books) {
     const manifest = await loadManifest(root, book);
     for (const page of manifest.pages) {
-      const truth = await loadTruth(root, book, page.id);
-      if (truth === null || truth.status === "draft") {
+      const truth = await truthFor(root, book, page);
+      if (!truth.ok) {
+        run.failures.push({ book, ...truth.failure });
+        continue;
+      }
+      if (truth.value === null || truth.value.status === "draft") {
         run.skipped.push({
           book,
           page: page.id,
-          reason: truth === null ? "no_truth" : "draft",
+          reason: truth.value === null ? "no_truth" : "draft",
         });
         continue;
       }
-      const image = join(bookPaths(root, book).images, page.image);
-      if (!(await exists(image))) {
-        run.failures.push({ book, page: page.id, reason: "image_missing" });
+      const reading = await readPage(root, book, page, reader);
+      if (!reading.ok) {
+        run.failures.push({ book, ...reading.failure });
         continue;
       }
 
-      let reading;
-      try {
-        reading = await reader.read({ path: image, pdf_page: page.pdf_page });
-      } catch (error) {
-        run.failures.push({
-          book,
-          page: page.id,
-          reason: "read_failed",
-          detail: String(error),
-        });
-        continue;
-      }
+      const { content, usage } = reading.value;
       const scores = emptyScores();
       for (const name of METRIC_NAMES) {
         const metric: Metric = METRICS[name];
-        scores[name] = metric.score(truth, reading.content, reading.usage);
+        scores[name] = metric.score(truth.value, content, usage);
         run.totals[name] = add(run.totals[name], scores[name]);
       }
       run.pages.push({
         book,
         page: page.id,
         scores,
-        usage: reading.usage,
-        prediction: reading.content,
+        usage,
+        prediction: content,
       });
     }
   }
@@ -274,30 +261,29 @@ function emptyScores(): Record<MetricName, Ratio> {
   ) as Record<MetricName, Ratio>;
 }
 
+/** How each unit prints a value, and the size of a change. */
+const UNITS: Record<
+  Metric["unit"],
+  { value: (v: number) => string; change: (size: number) => string }
+> = {
+  percent: {
+    value: (v) => `${(v * 100).toFixed(1)}%`,
+    change: (size) => `${(size * 100).toFixed(1)} pts`,
+  },
+  usd: {
+    value: (v) => `$${v.toFixed(4)}`,
+    change: (size) => `$${size.toFixed(4)}`,
+  },
+  iou: { value: (v) => v.toFixed(3), change: (size) => size.toFixed(3) },
+};
+
 function show(metric: MetricName, v: number | null): string {
-  if (v === null) return "—";
-  switch (METRICS[metric].unit) {
-    case "percent":
-      return `${(v * 100).toFixed(1)}%`;
-    case "usd":
-      return `$${v.toFixed(4)}`;
-    case "iou":
-      return v.toFixed(3);
-  }
+  return v === null ? "—" : UNITS[METRICS[metric].unit].value(v);
 }
 
 function showDelta(metric: MetricName, d: number | null): string {
   if (d === null) return "—";
-  const sign = d < 0 ? "-" : "+";
-  const size = Math.abs(d);
-  switch (METRICS[metric].unit) {
-    case "percent":
-      return `${sign}${(size * 100).toFixed(1)} pts`;
-    case "usd":
-      return `${sign}$${size.toFixed(4)}`;
-    case "iou":
-      return `${sign}${size.toFixed(3)}`;
-  }
+  return (d < 0 ? "-" : "+") + UNITS[METRICS[metric].unit].change(Math.abs(d));
 }
 
 function trim(n: number): string {

@@ -75,31 +75,45 @@ export const Usage = z.object({
 });
 export type Usage = z.infer<typeof Usage>;
 
+/** A page the reader hasn't read anything from: the stub's result and an undrafted page's starting point. */
+export function emptyPage(pdfPage: number): PageContent {
+  return {
+    pdf_page: pdfPage,
+    printed_page: null,
+    stimuli: [],
+    questions: [],
+    explanation: [],
+  };
+}
+
+/** Book and page ids are safe as folder and file names. */
+const Id = z
+  .string()
+  .regex(
+    /^[a-z0-9][a-z0-9-]*$/,
+    "ids are lowercase letters, digits and dashes",
+  );
+
+export const ManifestPage = z.object({
+  id: Id,
+  pdf_page: z.int().positive(),
+  /** File name inside `golden/<book>/images/`, which is never committed. */
+  image: z.string().regex(/^[^/\\]+$/, "image is a file name, not a path"),
+});
+export type ManifestPage = z.infer<typeof ManifestPage>;
+
 /** `golden/<book>/manifest.json`: which pages are in the set and where their images are. */
 export const BookManifest = z.object({
-  book: z
-    .string()
-    .regex(
-      /^[a-z0-9][a-z0-9-]*$/,
-      "book ids are lowercase letters, digits and dashes",
-    ),
+  book: Id,
   title: z.string(),
-  pages: z
-    .array(
-      z.object({
-        id: z
-          .string()
-          .regex(
-            /^[a-z0-9][a-z0-9-]*$/,
-            "page ids are lowercase letters, digits and dashes",
-          ),
-        pdf_page: z.int().positive(),
-        /** File name inside `golden/<book>/images/`, which is never committed. */
-        image: z
-          .string()
-          .regex(/^[^/\\]+$/, "image is a file name, not a path"),
-      }),
-    )
-    .min(1),
+  pages: z.array(ManifestPage).min(1),
 });
 export type BookManifest = z.infer<typeof BookManifest>;
+
+/** A page that was attempted and not delivered, and why. */
+export const PageFailure = z.object({
+  page: z.string(),
+  reason: z.enum(["invalid_truth", "image_missing", "read_failed"]),
+  detail: z.string().optional(),
+});
+export type PageFailure = z.infer<typeof PageFailure>;

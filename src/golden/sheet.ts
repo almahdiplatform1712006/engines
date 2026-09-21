@@ -1,9 +1,10 @@
 // The correction sheet: a local HTML page that shows each golden page image next
 // to its draft truth, so the owner can fix the draft and save it as corrected.
 // It links the images (never embeds them) and is git-ignored.
-import { writeFile } from "node:fs/promises";
-import { bookPaths, loadManifest, loadTruth } from "./book.ts";
-import type { PageTruth } from "./truth.ts";
+import { readFile, writeFile } from "node:fs/promises";
+import { bookPaths, loadManifest } from "./book.ts";
+import { truthFor } from "./pages.ts";
+import { emptyPage } from "./truth.ts";
 
 export async function writeCorrectionSheet(
   root: string,
@@ -12,26 +13,29 @@ export async function writeCorrectionSheet(
   const manifest = await loadManifest(root, book);
   const sections: string[] = [];
   for (const page of manifest.pages) {
-    const truth: PageTruth = (await loadTruth(root, book, page.id)) ?? {
-      status: "draft",
-      pdf_page: page.pdf_page,
-      printed_page: null,
-      stimuli: [],
-      questions: [],
-      explanation: [],
-    };
+    const truth = await truthFor(root, book, page);
+    // A broken truth file is shown as it is, with the error, for the owner to fix.
+    const status = truth.ok ? (truth.value?.status ?? "draft") : "invalid";
+    const text = truth.ok
+      ? JSON.stringify(
+          truth.value ?? { status, ...emptyPage(page.pdf_page) },
+          null,
+          2,
+        )
+      : await readFile(bookPaths(root, book).truth(page.id), "utf8");
+    const error = truth.ok ? "" : (truth.failure.detail ?? "");
     sections.push(`<section class="page" data-page="${escape(page.id)}">
   <figure>
     <img src="images/${escape(encodeURIComponent(page.image))}" alt="${escape(page.id)}" loading="lazy">
     <figcaption>${escape(page.id)} · PDF page ${String(page.pdf_page)}</figcaption>
   </figure>
   <div class="editor">
-    <p class="status" data-status="${truth.status}">${truth.status}</p>
-    <textarea dir="auto" spellcheck="false">${escape(JSON.stringify(truth, null, 2))}</textarea>
+    <p class="status" data-status="${status}">${status}</p>
+    <textarea dir="auto" spellcheck="false">${escape(text)}</textarea>
     <p class="actions">
       <button type="button" data-save="draft">Save draft</button>
       <button type="button" data-save="corrected">Save as corrected</button>
-      <span class="message" role="status"></span>
+      <span class="message${error ? " error" : ""}" role="status">${escape(error)}</span>
     </p>
   </div>
 </section>`);
@@ -68,6 +72,7 @@ function page(title: string, book: string, body: string): string {
   textarea { inline-size: 100%; min-block-size: 70vh; font: 13px/1.5 ui-monospace, monospace; box-sizing: border-box; }
   .status[data-status="corrected"] { color: #1a7f37; font-weight: bold; }
   .status[data-status="draft"] { color: #9a6700; font-weight: bold; }
+  .status[data-status="invalid"] { color: #cf222e; font-weight: bold; }
   .message { margin-inline-start: 8px; }
   .message.error { color: #cf222e; }
   @media (max-width: 800px) { .page { grid-template-columns: 1fr; } figure { position: static; } }

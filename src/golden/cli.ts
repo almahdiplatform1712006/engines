@@ -16,6 +16,7 @@ import {
   writeRun,
 } from "./score.ts";
 import { writeCorrectionSheet } from "./sheet.ts";
+import type { PageFailure } from "./truth.ts";
 
 const ROOT = fileURLToPath(new URL("../../golden/", import.meta.url));
 
@@ -55,11 +56,9 @@ async function draft(args: string[]): Promise<number> {
   console.log(
     `kept (already drafted or corrected): ${report.kept.join(", ") || "none"}`,
   );
-  for (const failure of report.failures) {
-    console.log(
-      `failed: ${failure.page} — ${failure.reason}${failure.detail ? `: ${failure.detail}` : ""}`,
-    );
-  }
+  report.failures.forEach((failure) => {
+    printFailure(book, failure);
+  });
   console.log(`correction sheet: ${await writeCorrectionSheet(ROOT, book)}`);
   return report.failures.length === 0 ? 0 : 1;
 }
@@ -101,16 +100,19 @@ async function score(args: string[]): Promise<number> {
   });
 
   console.log(formatRun(run));
-  for (const failure of run.failures) {
-    console.log(
-      `failed: ${failure.book}/${failure.page} — ${failure.reason}${failure.detail ? `: ${failure.detail}` : ""}`,
-    );
-  }
+  run.failures.forEach((failure) => {
+    printFailure(failure.book, failure);
+  });
   console.log(`\nwrote ${await writeRun(ROOT, run)}`);
   if (values.baseline !== undefined) {
     console.log(`\n${formatComparison(await loadRun(values.baseline), run)}`);
   }
   return run.failures.length === 0 ? 0 : 1;
+}
+
+function printFailure(book: string, failure: PageFailure): void {
+  const detail = failure.detail === undefined ? "" : `: ${failure.detail}`;
+  console.log(`failed: ${book}/${failure.page} — ${failure.reason}${detail}`);
 }
 
 function onlyBook(positionals: string[]): string {

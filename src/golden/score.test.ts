@@ -130,6 +130,54 @@ describe("scoreBooks", () => {
       { book: "physics-g10", page: "p013", reason: "image_missing" },
     ]);
   });
+
+  test("a broken truth file fails that page and the run carries on", async () => {
+    await writeFile(
+      join(root, "physics-g10", "truth", "p012.json"),
+      JSON.stringify({ status: "corrected", pdf_page: 12 }),
+    );
+
+    const run = await scoreBooks({
+      root,
+      books: ["physics-g10"],
+      reader: partReader,
+    });
+
+    assert.deepEqual(
+      run.pages.map((p) => p.page),
+      ["p011"],
+    );
+    const failure = run.failures.find((f) => f.page === "p012");
+    assert.ok(failure);
+    assert.equal(failure.reason, "invalid_truth");
+    assert.match(failure.detail ?? "", /p012\.json/);
+  });
+
+  test("a reader that throws fails that page and the run carries on", async () => {
+    const flaky: PageReader = {
+      name: "flaky",
+      read: (image) =>
+        image.pdf_page === 11
+          ? Promise.reject(new Error("model timed out"))
+          : partReader.read(image),
+    };
+
+    const run = await scoreBooks({
+      root,
+      books: ["physics-g10"],
+      reader: flaky,
+    });
+
+    assert.deepEqual(run.failures, [
+      {
+        book: "physics-g10",
+        page: "p011",
+        reason: "read_failed",
+        detail: "Error: model timed out",
+      },
+      { book: "physics-g10", page: "p013", reason: "image_missing" },
+    ]);
+  });
 });
 
 function run(

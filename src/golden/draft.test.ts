@@ -132,16 +132,27 @@ describe("draftBook", () => {
     );
   });
 
-  test("names the file when a truth file isn't JSON", async () => {
+  test("leaves a broken truth file alone and reports it, naming the file", async () => {
     await mkdir(join(root, "physics-g10", "truth"), { recursive: true });
     await writeFile(
       join(root, "physics-g10", "truth", "p011.json"),
       "{ not json",
     );
 
-    await assert.rejects(
-      draftBook({ root, book: "physics-g10", reader: stubReader }),
-      /p011\.json/,
+    const report = await draftBook({
+      root,
+      book: "physics-g10",
+      reader: stubReader,
+      force: true,
+    });
+
+    const failure = report.failures.find((f) => f.page === "p011");
+    assert.ok(failure);
+    assert.equal(failure.reason, "invalid_truth");
+    assert.match(failure.detail ?? "", /p011\.json/);
+    assert.equal(
+      await readFile(join(root, "physics-g10", "truth", "p011.json"), "utf8"),
+      "{ not json",
     );
   });
 

@@ -1,6 +1,6 @@
 // The page reader the golden tools run. The model reader arrives with the reading
 // tickets (E-05/E-06) and registers here; until then only the stub exists.
-import type { PageContent, Usage } from "./truth.ts";
+import { emptyPage, type PageContent, type Usage } from "./truth.ts";
 
 export interface PageImage {
   /** Path to the page image on disk. */
@@ -26,13 +26,7 @@ export const stubReader: PageReader = {
   name: "stub",
   read(image) {
     return Promise.resolve({
-      content: {
-        pdf_page: image.pdf_page,
-        printed_page: null,
-        stimuli: [],
-        questions: [],
-        explanation: [],
-      },
+      content: emptyPage(image.pdf_page),
       usage: { input_tokens: 0, output_tokens: 0, cost_usd: 0 },
     });
   },

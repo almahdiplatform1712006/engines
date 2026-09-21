@@ -1,10 +1,10 @@
 // Drafting: run the current page reader over a golden book's pages and write
 // draft truth files for the owner to correct (spec decision Q30).
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { bookPaths, exists, loadManifest, loadTruth } from "./book.ts";
+import { bookPaths, loadManifest } from "./book.ts";
+import { readPage, truthFor } from "./pages.ts";
 import type { PageReader } from "./reader.ts";
-import type { PageTruth } from "./truth.ts";
+import type { PageFailure, PageTruth } from "./truth.ts";
 
 export interface DraftOptions {
   root: string;
@@ -20,11 +20,7 @@ export interface DraftReport {
   /** Pages whose existing truth file was left alone. */
   kept: string[];
   /** Pages that could not be drafted, and why. */
-  failures: {
-    page: string;
-    reason: "image_missing" | "read_failed";
-    detail?: string;
-  }[];
+  failures: PageFailure[];
 }
 
 export async function draftBook({
@@ -39,33 +35,29 @@ export async function draftBook({
 
   await mkdir(paths.truthDir, { recursive: true });
   for (const page of manifest.pages) {
-    const existing = await loadTruth(root, book, page.id);
-    if (existing !== null && (existing.status === "corrected" || !force)) {
+    const existing = await truthFor(root, book, page);
+    if (!existing.ok) {
+      report.failures.push(existing.failure);
+      continue;
+    }
+    if (
+      existing.value !== null &&
+      (existing.value.status === "corrected" || !force)
+    ) {
       report.kept.push(page.id);
       continue;
     }
 
-    const image = join(paths.images, page.image);
-    if (!(await exists(image))) {
-      report.failures.push({ page: page.id, reason: "image_missing" });
+    const reading = await readPage(root, book, page, reader);
+    if (!reading.ok) {
+      report.failures.push(reading.failure);
       continue;
     }
-
-    let truth: PageTruth;
-    try {
-      const { content } = await reader.read({
-        path: image,
-        pdf_page: page.pdf_page,
-      });
-      truth = { status: "draft", ...content, pdf_page: page.pdf_page };
-    } catch (error) {
-      report.failures.push({
-        page: page.id,
-        reason: "read_failed",
-        detail: String(error),
-      });
-      continue;
-    }
+    const truth: PageTruth = {
+      status: "draft",
+      ...reading.value.content,
+      pdf_page: page.pdf_page,
+    };
     await writeFile(
       paths.truth(page.id),
       `${JSON.stringify(truth, null, 2)}\n`,
