@@ -10,7 +10,13 @@ import {
 } from "ai";
 import { z } from "zod";
 import { ModelBlock, ModelPage, toBlock, toPageReading } from "./blocks.ts";
-import { READ_NUMBER, READ_PAGE, readPair } from "./prompts.ts";
+import {
+  READ_NUMBER,
+  READ_PAGE,
+  readPair,
+  SOLVE,
+  solvePrompt,
+} from "./prompts.ts";
 import type {
   CallContext,
   ModelCall,
@@ -47,6 +53,11 @@ const PairPages = z.object({
 export class NoJoinedBlockError extends Error {
   override name = "NoJoinedBlockError";
 }
+
+const Solved = z.object({
+  correct: z.array(z.string()),
+  accepted_answers: z.array(z.string()),
+});
 
 const PrintedNumber = z.object({
   printed_page: z
@@ -179,6 +190,11 @@ export function createModelReader(options: ModelReaderOptions): PageReader {
           `pair ${first.id} + ${second.id}: no joined block returned`,
         );
       return toBlock(first.pdf_page, first.order, joined);
+    },
+    solve(question, context) {
+      return call(options.main, "solve", null, context, Solved, SOLVE, [
+        { type: "text", text: solvePrompt(question) },
+      ]);
     },
     async readPage(image, context) {
       const page = await call(

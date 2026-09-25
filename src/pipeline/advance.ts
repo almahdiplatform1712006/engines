@@ -7,7 +7,11 @@
 // `advance` runs whenever a stage's last task settles. It works out the next
 // stage's tasks from what is stored; a stage with no tasks is passed straight
 // through. Each task settles once and counts the document down, like pages.
-import { assemble, type FailedPage } from "../assembly/assemble.ts";
+import {
+  assemble,
+  type AssemblyInput,
+  type FailedPage,
+} from "../assembly/assemble.ts";
 import { cutCrops } from "./crops.ts";
 import type { Join } from "../assembly/continuations.ts";
 import { findPairs } from "../assembly/continuations.ts";
@@ -16,6 +20,7 @@ import { IDENTITY } from "../offset/segments.ts";
 import { getOutline } from "../outline/store.ts";
 import type { Block, PageReading } from "../reading/blocks.ts";
 import { NoJoinedBlockError, TruncatedOutputError } from "../reading/model.ts";
+import type { SolveRequest, SolvedAnswer } from "../reading/reader.ts";
 import {
   inTransaction,
   messageOf,
@@ -32,6 +37,7 @@ interface StoredInputs {
   readings: PageReading[];
   failedPages: FailedPage[];
   joins: Join[];
+  solved: Map<string, SolvedAnswer>;
 }
 
 export async function advance(
@@ -59,8 +65,13 @@ export async function advance(
     stage = "pair";
   }
   if (stage === "pair") {
-    // Step 7 (E-11): questions with no book or marked answer are solved.
-    if (await fanOut(deps, doc, "solve", [])) return;
+    // Step 7: questions with no book or marked answer are solved by the model.
+    const { unanswered } = assemble(await assemblyInput(deps, doc, inputs));
+    const tasks = unanswered.map((question) => ({
+      key: question.question_id,
+      input: question,
+    }));
+    if (await fanOut(deps, doc, "solve", tasks)) return;
   }
   await finish(deps, doc, inputs);
 }
@@ -128,7 +139,9 @@ export async function runTask(deps: PipelineDeps, job: TaskJob): Promise<void> {
 
   let output: unknown;
   try {
-    if (job.stage === "pair") {
+    if (job.stage === "solve") {
+      output = await reader.solve(task.input as SolveRequest, context);
+    } else {
       const { first, second } = task.input as { first: Block; second: Block };
       output = await reader.readPair(
         [
@@ -138,8 +151,6 @@ export async function runTask(deps: PipelineDeps, job: TaskJob): Promise<void> {
         [first, second],
         context,
       );
-    } else {
-      throw new Error(`no handler for ${job.stage} tasks`);
     }
   } catch (error) {
     // Output that never fits, or a join the model didn't return, won't change on a retry.
@@ -239,12 +250,18 @@ async function storedInputs(
   );
   const tasks = await deps.db.query<{
     stage: Stage;
+    key: string;
     state: "pending" | "done" | "failed";
-    input: { first: Block; second: Block };
-    output: Block | null;
-  }>("SELECT stage, state, input, output FROM tasks WHERE document_id = $1", [
-    doc.id,
-  ]);
+    input: unknown;
+    output: unknown;
+  }>(
+    "SELECT stage, key, state, input, output FROM tasks WHERE document_id = $1",
+    [doc.id],
+  );
+  const done = (stage: Stage) =>
+    tasks.rows.filter(
+      (t) => t.stage === stage && t.state === "done" && t.output,
+    );
 
   return {
     readings: pages.rows.flatMap((p) =>
@@ -253,16 +270,33 @@ async function storedInputs(
     failedPages: pages.rows
       .filter((p) => p.state !== "read")
       .map((p) => ({ pdf_page: p.pdf_page, detail: p.error ?? "not read" })),
-    joins: tasks.rows.flatMap((t) =>
-      t.stage === "pair" && t.state === "done" && t.output
-        ? [
-            {
-              replaces: [t.input.first.id, t.input.second.id] as const,
-              block: t.output,
-            },
-          ]
-        : [],
+    joins: done("pair").map((t) => {
+      const { first, second } = t.input as { first: Block; second: Block };
+      return {
+        replaces: [first.id, second.id] as const,
+        block: t.output as Block,
+      };
+    }),
+    solved: new Map(
+      done("solve").map((t) => [t.key, t.output as SolvedAnswer]),
     ),
+  };
+}
+
+async function assemblyInput(
+  deps: PipelineDeps,
+  doc: DocumentRow,
+  inputs: StoredInputs,
+): Promise<AssemblyInput> {
+  const outline = await getOutline(deps.db, doc.org_id, doc.outline_id);
+  if (!outline) throw new Error(`outline ${doc.outline_id} is missing`);
+  return {
+    type: doc.type,
+    tree: outline.nodes,
+    segments: doc.offset_segments ?? IDENTITY,
+    pages: inputs.readings,
+    failedPages: inputs.failedPages,
+    joins: inputs.joins,
   };
 }
 
@@ -272,16 +306,9 @@ async function finish(
   doc: DocumentRow,
   inputs: StoredInputs,
 ): Promise<void> {
-  const outline = await getOutline(deps.db, doc.org_id, doc.outline_id);
-  if (!outline) throw new Error(`outline ${doc.outline_id} is missing`);
-
-  const result = assemble({
-    type: doc.type,
-    tree: outline.nodes,
-    segments: doc.offset_segments ?? IDENTITY,
-    pages: inputs.readings,
-    failedPages: inputs.failedPages,
-    joins: inputs.joins,
+  const { result } = assemble({
+    ...(await assemblyInput(deps, doc, inputs)),
+    solved: inputs.solved,
   });
   await cutCrops(deps, doc.id, result);
   const status =

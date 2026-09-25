@@ -24,7 +24,7 @@ function run(
     ),
     failedPages: [],
     ...overrides,
-  });
+  }).result;
 }
 
 describe("placement (E-05)", () => {

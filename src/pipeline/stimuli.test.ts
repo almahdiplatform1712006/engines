@@ -66,12 +66,12 @@ test("one stimulus per passage or diagram, linked from its questions", async () 
   assert.deepEqual(
     doc.questions.map((q) => [q.number, q.stimulus_id, q.review_reason]),
     [
-      ["1", "s_1_0", null],
-      ["2", "s_1_0", null],
-      ["3", "s_1_0", null],
-      ["4", null, null],
-      ["5", "s_2_0", null],
-      ["6", "s_2_0", null],
+      ["1", "s_1_0", "model_answer"],
+      ["2", "s_1_0", "model_answer"],
+      ["3", "s_1_0", "model_answer"],
+      ["4", null, "model_answer"],
+      ["5", "s_2_0", "model_answer"],
+      ["6", "s_2_0", "model_answer"],
       ["7", null, "image_unreadable"],
     ],
   );

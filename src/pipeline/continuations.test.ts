@@ -68,8 +68,8 @@ test("flagged pairs are re-read together and joined; unpaired flags are never lo
   assert.deepEqual(
     doc.questions.map((q) => [q.number, q.review_reason]),
     [
-      ["1", null],
-      ["2", null],
+      ["1", "model_answer"],
+      ["2", "model_answer"],
       ["4", "cut_off"],
       ["5", "cut_off"],
     ],

@@ -1,4 +1,4 @@
-// A PageReader that returns prepared pages instead of calling a model. The
+// A PageReader that returns prepared answers instead of calling a model. The
 // pipeline's integration tests run on it, so CI needs no model key.
 import {
   toBlock,
@@ -6,7 +6,7 @@ import {
   type ModelBlock,
   type ModelPage,
 } from "./blocks.ts";
-import type { PageReader, RecordCall } from "./reader.ts";
+import type { PageReader, RecordCall, SolvedAnswer } from "./reader.ts";
 
 export interface Script {
   /** What each PDF page "says". Pages not listed read as empty. */
@@ -18,40 +18,42 @@ export interface Script {
    * `printed_page`; set a page here to make the cheap read disagree.
    */
   numbers?: Record<number, string | null>;
-  /** The joined block a pair re-read returns, by the pair's first PDF page. */
+  /** The joined block a pair re-read returns, by the pair's first PDF page. Unlisted pairs fail. */
   joins?: Record<number, ModelBlock>;
+  /**
+   * What the model answers, by question number; unlisted questions fail to
+   * solve. Without this, every question is answered with its first option (or
+   * "answer" for a blank).
+   */
+  solutions?: Record<string, SolvedAnswer>;
   record?: RecordCall;
 }
 
-export function scriptedReader(script: Script): PageReader & {
+export interface ScriptedReader extends PageReader {
+  /** PDF pages read in full, in call order (a retried page appears twice). */
   reads: number[];
+  /** PDF pages whose printed number the quick pass read. */
   numberReads: number[];
+  /** First PDF pages of the pairs re-read. */
   pairReads: number[];
-} {
+  /** Ids of the questions the model was asked to solve. */
+  solves: string[];
+}
+
+export function scriptedReader(script: Script): ScriptedReader {
   const failuresLeft = new Map(
     Object.entries(script.failures ?? {}).map(([page, count]) => [
       Number(page),
       count,
     ]),
   );
-  const reads: number[] = [];
-  const numberReads: number[] = [];
-  const pairReads: number[] = [];
-  return {
-    reads,
-    numberReads,
-    pairReads,
-    readPair(_images, [first]) {
-      pairReads.push(first.pdf_page);
-      const joined = script.joins?.[first.pdf_page];
-      if (!joined)
-        return Promise.reject(
-          new Error(`no scripted join for page ${String(first.pdf_page)}`),
-        );
-      return Promise.resolve(toBlock(first.pdf_page, first.order, joined));
-    },
+  const reader: ScriptedReader = {
+    reads: [],
+    numberReads: [],
+    pairReads: [],
+    solves: [],
     readPrintedNumber(image) {
-      numberReads.push(image.pdfPage);
+      reader.numberReads.push(image.pdfPage);
       const number = script.numbers?.[image.pdfPage];
       return Promise.resolve(
         number === undefined
@@ -60,7 +62,7 @@ export function scriptedReader(script: Script): PageReader & {
       );
     },
     async readPage(image, context) {
-      reads.push(image.pdfPage);
+      reader.reads.push(image.pdfPage);
       const left = failuresLeft.get(image.pdfPage) ?? 0;
       const ok = left <= 0;
       if (!ok) failuresLeft.set(image.pdfPage, left - 1);
@@ -86,5 +88,37 @@ export function scriptedReader(script: Script): PageReader & {
       };
       return toPageReading(image.pdfPage, page);
     },
+    readPair(_images, [first]) {
+      reader.pairReads.push(first.pdf_page);
+      const joined = script.joins?.[first.pdf_page];
+      if (!joined) {
+        return Promise.reject(
+          new Error(`no scripted join for page ${String(first.pdf_page)}`),
+        );
+      }
+      return Promise.resolve(toBlock(first.pdf_page, first.order, joined));
+    },
+    solve(question) {
+      reader.solves.push(question.question_id);
+      if (script.solutions === undefined) {
+        const first = question.options[0];
+        return Promise.resolve(
+          first
+            ? { correct: [first.key], accepted_answers: [] }
+            : { correct: [], accepted_answers: ["answer"] },
+        );
+      }
+      const solution =
+        question.number === null
+          ? undefined
+          : script.solutions[question.number];
+      if (!solution) {
+        return Promise.reject(
+          new Error(`no scripted solution for ${question.question_id}`),
+        );
+      }
+      return Promise.resolve(solution);
+    },
   };
+  return reader;
 }

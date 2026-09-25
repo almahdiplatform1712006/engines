@@ -32,6 +32,23 @@ export interface PageReader {
     halves: readonly [Block, Block],
     context: CallContext,
   ): Promise<Block>;
+  /** Step 7: answers a question that has no book or marked answer (always flagged). */
+  solve(question: SolveRequest, context: CallContext): Promise<SolvedAnswer>;
+}
+
+/** A question for the model to solve, with its shared passage when it has one. */
+export interface SolveRequest {
+  question_id: string;
+  number: string | null;
+  type: "multiple_choice" | "fill_blank" | "true_false";
+  text: string;
+  options: { key: string; text: string }[];
+  stimulus: string | null;
+}
+
+export interface SolvedAnswer {
+  correct: string[];
+  accepted_answers: string[];
 }
 
 /** One model call, as the model-call log records it. */

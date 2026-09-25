@@ -19,6 +19,16 @@ import type {
   StoredStimulus,
 } from "./result.ts";
 import { linkStimuli } from "./stimuli.ts";
+import {
+  answerFor,
+  matchAnswerKey,
+  type Answer,
+  type AnswerEntry,
+} from "./answers.ts";
+import { flag, questionChecks } from "./checks.ts";
+import { headingNames } from "./placement.ts";
+import type { SolveRequest, SolvedAnswer } from "../reading/reader.ts";
+import type { TreeIndex } from "./tree-index.ts";
 import { indexTree } from "./tree-index.ts";
 
 export interface FailedPage {
@@ -36,6 +46,11 @@ export interface AssemblyInput {
   failedPages: readonly FailedPage[];
   /** Blocks re-read across a page break (step 4), replacing their halves. */
   joins?: readonly Join[];
+  /**
+   * The model's answers to the questions a first assembly left unanswered
+   * (step 7). When given, a question still without an answer is flagged.
+   */
+  solved?: ReadonlyMap<string, SolvedAnswer>;
 }
 
 /** Which block kinds each document type delivers. The rest are `off_type`. */
@@ -45,7 +60,13 @@ const DELIVERS: Record<DocumentType, readonly BlockKind[]> = {
   both: ["question", "passage", "answer_key", "explanation"],
 };
 
-export function assemble(input: AssemblyInput): ResultBody {
+/** The result, and the questions still without an answer for the model to solve. */
+export interface Assembly {
+  result: ResultBody;
+  unanswered: SolveRequest[];
+}
+
+export function assemble(input: AssemblyInput): Assembly {
   const index = indexTree(input.tree);
   const result: ResultBody = {
     stimuli: [],
@@ -192,8 +213,29 @@ export function assemble(input: AssemblyInput): ResultBody {
     }
   }
 
+  // Step 7: answers, from the book's key, then a mark on the page, then the model.
+  const marks = new Map(
+    questionItems.map(({ item }) => [
+      itemId("q", item.block.id),
+      item.block.question?.marked ?? [],
+    ]),
+  );
+  const unanswered = applyAnswers(
+    result.questions,
+    answerEntries(placed),
+    index,
+    drafts,
+    marks,
+    input.solved,
+  );
+
+  // Step 9: checks.
+  for (const question of result.questions) {
+    for (const reason of questionChecks(question)) flag(question, reason);
+  }
+
   result.failures.sort((a, b) => a.locator.pdf_page - b.locator.pdf_page);
-  return result;
+  return { result, unanswered };
 }
 
 /** A stable item id from the block it came from: `q_93_2` for block 2 of PDF page 93. */
@@ -285,4 +327,113 @@ function answerable(question: StoredQuestion): boolean {
   if (question.text.trim() === "") return false;
   if (question.type === "multiple_choice") return question.options.length >= 2;
   return true;
+}
+
+/**
+ * Answer-key entries in reading order. An entry without a section takes the
+ * last heading before it (an answers page headed "الدرس الثالث"); failing
+ * that, the node its block was placed in (answers printed at a lesson's end).
+ */
+function answerEntries(placed: readonly Placed[]): AnswerEntry[] {
+  const entries: AnswerEntry[] = [];
+  let lastHeading: string | null = null;
+  for (const item of placed) {
+    if (item.block.kind === "heading") lastHeading = item.block.text;
+    if (item.block.kind !== "answer_key") continue;
+    for (const answer of item.block.answers) {
+      entries.push({
+        ...answer,
+        section: answer.section ?? lastHeading,
+        node_id: item.node.node.kind === "content" ? item.node.node.id : null,
+      });
+    }
+  }
+  return entries;
+}
+
+/** Fills every question's answer and returns those left for the model. */
+function applyAnswers(
+  questions: StoredQuestion[],
+  entries: readonly AnswerEntry[],
+  index: TreeIndex,
+  stimuli: readonly DraftStimulus[],
+  marks: ReadonlyMap<string, readonly string[]>,
+  solved: ReadonlyMap<string, SolvedAnswer> | undefined,
+): SolveRequest[] {
+  const lessonOf = (section: string | null): string | null => {
+    if (section === null) return null;
+    const named = index.nodes
+      .filter((n) => n.node.kind === "content" && headingNames(section, n))
+      .sort((a, b) => b.depth - a.depth);
+    return named[0]?.node.id ?? null;
+  };
+  const inLesson = (questionNode: string, lesson: string) =>
+    questionNode === lesson ||
+    (index.byId.get(questionNode)?.ancestors.some((a) => a.id === lesson) ??
+      false);
+  const book = matchAnswerKey(entries, questions, lessonOf, inLesson);
+
+  const unanswered: SolveRequest[] = [];
+  for (const question of questions) {
+    const set = (answer: Answer, source: StoredQuestion["answer_source"]) => {
+      question.correct = answer.correct;
+      question.accepted_answers = answer.accepted_answers;
+      question.answer_source = source;
+    };
+    const fromBook = book.get(question.id);
+    if (fromBook) {
+      set(fromBook, "book");
+      continue;
+    }
+    const fromMarks = markedAnswer(question, marks.get(question.id) ?? []);
+    if (fromMarks) {
+      set(fromMarks, "marked");
+      continue;
+    }
+    const fromModel = solved?.get(question.id);
+    if (fromModel) {
+      set(
+        {
+          correct: fromModel.correct,
+          accepted_answers: fromModel.accepted_answers,
+        },
+        "model",
+      );
+      flag(question, "model_answer");
+      continue;
+    }
+    if (solved) {
+      flag(question, "no_answer");
+      continue;
+    }
+    const stimulus =
+      question.stimulus_id === null
+        ? undefined
+        : stimuli.find((s) => s.id === question.stimulus_id);
+    unanswered.push({
+      question_id: question.id,
+      number: question.number,
+      type: question.type,
+      text: question.text,
+      options: question.options,
+      stimulus: stimulus?.text ?? null,
+    });
+  }
+  return unanswered;
+}
+
+/** A hand mark on the page (a circle, tick or fill), when it names the question's options. */
+function markedAnswer(
+  question: StoredQuestion,
+  marks: readonly string[],
+): Answer | null {
+  if (marks.length === 0) return null;
+  const answers = marks.map((mark) => answerFor(mark, question));
+  if (answers.some((a) => a === null)) return null;
+  return {
+    correct: [...new Set(answers.flatMap((a) => a?.correct ?? []))],
+    accepted_answers: [
+      ...new Set(answers.flatMap((a) => a?.accepted_answers ?? [])),
+    ],
+  };
 }

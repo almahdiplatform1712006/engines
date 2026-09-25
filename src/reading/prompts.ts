@@ -17,6 +17,29 @@ It continues: «${second.text.slice(0, 300)}»
 Return that one ${first.kind}, whole and joined, as the only block in the entry for page ${String(first.page)}. Leave the entry for page ${String(second.page)} with no blocks. Follow the same rules as for a single page: copy text exactly, math as LaTeX, options with their printed labels, box_2d on page ${String(first.page)}.`;
 }
 
+export const SOLVE = `You are answering one question from a school book. Work it out carefully.
+For a multiple-choice or true/false question, return in "correct" the key(s) of the right option(s), exactly as given. For a fill-in-the-blank question, return in "accepted_answers" the answer(s) that fill the blank, with math as LaTeX, and leave "correct" empty.`;
+
+export function solvePrompt(question: {
+  type: string;
+  text: string;
+  options: readonly { key: string; text: string }[];
+  stimulus: string | null;
+}): string {
+  const parts = [];
+  if (question.stimulus)
+    parts.push(
+      `Passage or figure the question refers to:\n${question.stimulus}`,
+    );
+  parts.push(`Question (${question.type}):\n${question.text}`);
+  if (question.options.length > 0) {
+    parts.push(
+      `Options:\n${question.options.map((o) => `${o.key}) ${o.text}`).join("\n")}`,
+    );
+  }
+  return parts.join("\n\n");
+}
+
 export const READ_PAGE = `You are reading one page of a school book, as an image. The book may be Arabic (right-to-left), English, or both.
 
 Return every block on the page, in reading order, labelled:

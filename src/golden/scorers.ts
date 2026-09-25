@@ -1,6 +1,6 @@
 // Scorers compare what a page reader returned for one page with the page's truth.
 // Each returns a Ratio so that pages add up into book and run totals.
-import katex from "katex";
+import { mathSpans, parsesInKatex } from "../shared/latex.ts";
 import { normalizeArabic } from "../shared/text.ts";
 import { characterErrorRate, similarity } from "./arabic.ts";
 import type { Ratio } from "./ratio.ts";
@@ -175,9 +175,6 @@ export function printedPageAccuracy(
 }
 
 // $$…$$, \[…\], \(…\) or $…$. An escaped \$ is a dollar sign, not math.
-const MATH_SPAN =
-  /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(?<!\\)\$((?:\\\$|[^$])+?)(?<!\\)\$/g;
-
 /** Math spans in the reader's output that KaTeX parses (`throwOnError`), as spec §4 step 9 checks. */
 export function latexParseRate(predicted: PageContent): Ratio {
   const texts = [
@@ -191,29 +188,12 @@ export function latexParseRate(predicted: PageContent): Ratio {
   let num = 0;
   let den = 0;
   for (const text of texts) {
-    for (const match of text.matchAll(MATH_SPAN)) {
-      const [, display, bracket, paren, inline] = match;
-      const tex = display ?? bracket ?? paren ?? inline ?? "";
+    for (const span of mathSpans(text)) {
       den += 1;
-      if (parsesInKatex(tex, display !== undefined || bracket !== undefined))
-        num += 1;
+      if (parsesInKatex(span)) num += 1;
     }
   }
   return { num, den };
-}
-
-function parsesInKatex(tex: string, displayMode: boolean): boolean {
-  try {
-    // strict: false only silences KaTeX's style warnings (such as Arabic outside \text); parse errors still throw.
-    katex.renderToString(tex, {
-      throwOnError: true,
-      displayMode,
-      strict: false,
-    });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** One page's logged cost in US dollars. */
