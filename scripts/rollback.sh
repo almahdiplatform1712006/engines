@@ -29,9 +29,17 @@ run() {
 
 echo "Rolling $ENV_NAME back to what was serving at ${RECORDED_AT:-?}."
 $RUN || echo "Dry run: add --yes to do it."
+if [[ -z "${API_REVISION:-}" && -z "${WORKER_IMAGE:-}" ]]; then
+  echo "Nothing was serving before the last deploy (a first release): nothing to roll back to." >&2
+  exit 1
+fi
 if [[ -n "${API_REVISION:-}" ]]; then
   run gcloud run services update-traffic "$PREFIX-api" "${COMMON[@]}" --to-revisions="$API_REVISION=100"
+else
+  echo "WARNING: no API revision recorded; the API is left as it is." >&2
 fi
 if [[ -n "${WORKER_IMAGE:-}" ]]; then
   run gcloud beta run worker-pools deploy "$PREFIX-worker" "${COMMON[@]}" --image="$WORKER_IMAGE"
+else
+  echo "WARNING: no worker image recorded; the worker is left as it is." >&2
 fi

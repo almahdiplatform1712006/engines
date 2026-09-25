@@ -98,7 +98,9 @@ ${[header, rule, ...BOUGHT_FOR.map(row)].join("\n")}
 
 ${[header, rule, ...METRIC_NAMES.map(row)].join("\n")}
 
-Cost per page is from each run's logged usage: the model's calls and the add-on's price per page.
+Cost per page is from each run's logged usage: the model's calls as the provider reported them, plus the add-on's price per page as set in \`.env\` (not billed usage: check it against the add-on's invoice).
+
+An add-on's crop IoU is measured on the boxes of text it matched to the model's blocks; figures it found without text aren't matched yet, so its crops may score below what it could do.
 
 ## Recommendation
 

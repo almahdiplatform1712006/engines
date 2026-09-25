@@ -30,7 +30,8 @@ esac
 DB_CONN_VAR="ENGINES_DB_$(tr '[:lower:]' '[:upper:]' <<<"$DB_ENV")_CONNECTION"
 DB_CONN="${!DB_CONN_VAR:?$DB_CONN_VAR missing; run scripts/setup-gcp.sh}"
 URL_VAR="PUBLIC_URL_$(tr '[:lower:]' '[:upper:]' <<<"$ENV_NAME")"
-PUBLIC_URL="${!URL_VAR:-}"
+# Sign-in (Better Auth, Google's callback) needs the public address.
+PUBLIC_URL="${!URL_VAR:?set $URL_VAR in .env: the address the page is served at}"
 
 SHA=$(git rev-parse --short=12 HEAD)
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -56,7 +57,7 @@ $RUN || echo "Dry run: nothing is changed. Add --yes once the owner has approved
 SECRETS="DATABASE_URL=engines-database-url-$DB_ENV:latest"
 SECRETS+=",AUTH_SECRET=engines-auth-secret-$ENV_NAME:latest"
 SECRETS+=",OPENROUTER_API_KEY=engines-openrouter-key-$DB_ENV:latest"
-SECRETS+=",GOOGLE_CLIENT_SECRET=engines-google-client-secret:latest"
+SECRETS+=",GOOGLE_CLIENT_SECRET=engines-google-oauth-client-secret:latest"
 # Staging has its own buckets (docs/release.md), never production's.
 if [[ "$ENV_NAME" == staging ]]; then
   UPLOADS="${ENGINES_STAGING_BUCKET_UPLOADS:?create the staging buckets first, see docs/release.md}"
@@ -66,25 +67,41 @@ else
 fi
 ENV_VARS="STORAGE=gcs,GCS_BUCKET_UPLOADS=$UPLOADS,GCS_BUCKET_PAGES=$PAGES,GCS_BUCKET_RESULTS=$RESULTS"
 ENV_VARS+=",AI_MODEL=$AI_MODEL,GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}"
-[[ -n "$PUBLIC_URL" ]] && ENV_VARS+=",PUBLIC_URL=$PUBLIC_URL"
+ENV_VARS+=",PUBLIC_URL=$PUBLIC_URL"
 COMMON=(--project="$GCP_PROJECT_ID" --region="$GCP_REGION")
 RUNTIME=(--service-account="$ENGINES_RUNTIME_SA" --set-cloudsql-instances="$DB_CONN"
   --set-secrets="$SECRETS" --set-env-vars="$ENV_VARS" --labels=service=engines)
 
 echo; echo "1. Build the image"
-run gcloud artifacts repositories describe engines --location="$GCP_REGION" --project="$GCP_PROJECT_ID" \
-  || run gcloud artifacts repositories create engines --repository-format=docker \
+if $RUN && gcloud artifacts repositories describe engines --location="$GCP_REGION" \
+  --project="$GCP_PROJECT_ID" >/dev/null 2>&1; then
+  echo "(the engines image repository exists)"
+else
+  run gcloud artifacts repositories create engines --repository-format=docker \
     --location="$GCP_REGION" --project="$GCP_PROJECT_ID" --labels=service=engines
+fi
 run gcloud builds submit --tag="$IMAGE" --project="$GCP_PROJECT_ID"
 
 echo; echo "2. Record what's serving now, for rollback ($RECORD)"
 if $RUN; then
   mkdir -p deploy
+  API_REVISION=""
+  WORKER_IMAGE=""
+  if gcloud run services describe "$API" "${COMMON[@]}" >/dev/null 2>&1; then
+    API_REVISION=$(gcloud run services describe "$API" "${COMMON[@]}" \
+      --format='value(status.traffic[0].revisionName)')
+    [[ -n "$API_REVISION" ]] || { echo "Can't read $API's serving revision: stopping." >&2; exit 1; }
+  fi
+  if gcloud beta run worker-pools describe "$WORKER" "${COMMON[@]}" >/dev/null 2>&1; then
+    WORKER_IMAGE=$(gcloud beta run worker-pools describe "$WORKER" "${COMMON[@]}" \
+      --format='value(template.containers[0].image)')
+    [[ -n "$WORKER_IMAGE" ]] || { echo "Can't read $WORKER's image: stopping." >&2; exit 1; }
+  fi
+  # Earlier records are kept, so re-running after a bad deploy can still go back further.
+  [[ -f "$RECORD" ]] && cp "$RECORD" "deploy/$ENV_NAME-$(date -u +%Y%m%dT%H%M%SZ).env"
   {
-    echo "API_REVISION=$(gcloud run services describe "$API" "${COMMON[@]}" \
-      --format='value(status.traffic[0].revisionName)' 2>/dev/null || true)"
-    echo "WORKER_IMAGE=$(gcloud beta run worker-pools describe "$WORKER" "${COMMON[@]}" \
-      --format='value(spec.template.containers[0].image)' 2>/dev/null || true)"
+    echo "API_REVISION=$API_REVISION"
+    echo "WORKER_IMAGE=$WORKER_IMAGE"
     echo "RECORDED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } >"$RECORD"
   cat "$RECORD"
@@ -106,9 +123,12 @@ run gcloud beta run worker-pools deploy "$WORKER" "${COMMON[@]}" --image="$IMAGE
 echo; echo "5. Smoke checks"
 if $RUN; then
   URL=${PUBLIC_URL:-$(gcloud run services describe "$API" "${COMMON[@]}" --format='value(status.url)')}
-  curl -fsS "$URL/v1/health" && echo
-  curl -fsS "$URL/" | grep -q 'dir="rtl"' && echo "the page loads right-to-left"
-  curl -fsS "$URL/v1/openapi.json" >/dev/null && echo "openapi.json is served"
+  fail() { echo "Smoke check failed: $1. Roll back: scripts/rollback.sh $ENV_NAME --yes" >&2; exit 1; }
+  curl -fsS "$URL/v1/health" >/dev/null || fail "/v1/health"
+  page=$(curl -fsS "$URL/") || fail "the page"
+  [[ "$page" == *'dir="rtl"'* ]] || fail "the page isn't right-to-left"
+  curl -fsS "$URL/v1/openapi.json" >/dev/null || fail "/v1/openapi.json"
+  echo "health, the right-to-left page and openapi.json all answer"
 else
   echo "+ curl \$URL/v1/health; the page's dir=\"rtl\"; /v1/openapi.json"
 fi

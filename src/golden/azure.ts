@@ -1,7 +1,7 @@
 // Azure AI Document Intelligence, Layout (v4), for the reading trial (E-06):
 // paragraphs with roles (pageNumber, sectionHeading, …) and their polygons.
-// REST, so the trial needs no Azure SDK. Formulas come with the `formulas`
-// add-on feature; the trial records them, the merge doesn't use them yet.
+// REST, so the trial needs no Azure SDK. The `formulas` feature is asked for
+// (it's part of the price), but the merge doesn't use formulas yet.
 import { boxFromPolygon, type Layout, type LayoutSource } from "./layout.ts";
 
 const API_VERSION = "2024-11-30";
@@ -44,8 +44,13 @@ export function azureLayout(options: AzureOptions): LayoutSource {
       const operation = start.headers.get("operation-location");
       if (start.status !== 202 || !operation)
         throw new Error(`Azure refused the page (${String(start.status)})`);
-      for (;;) {
+      // Up to two minutes, then the page counts as failed.
+      for (let tries = 0; tries < 120_000 / (options.pollMs ?? 1000); tries++) {
         const poll = await doFetch(operation, { headers });
+        if (!poll.ok)
+          throw new Error(
+            `Azure analysis poll failed (${String(poll.status)})`,
+          );
         const body = (await poll.json()) as {
           status: string;
           analyzeResult?: AnalyzeResult;
@@ -58,6 +63,7 @@ export function azureLayout(options: AzureOptions): LayoutSource {
           setTimeout(resolve, options.pollMs ?? 1000),
         );
       }
+      throw new Error("Azure took over two minutes on the page");
     },
   };
 }

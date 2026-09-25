@@ -6,14 +6,15 @@ Engines goes live inside its own walls: its own Cloud Run services, Cloud SQL se
 
 `scripts/setup-gcp.sh` (E-02) made the servers, buckets, service account, AI keys and OAuth client. Add what the release needs on top:
 
-1. **Secrets** in Secret Manager, labelled `service=engines`, readable by `engines-runtime` only:
+1. **APIs**: enable `run.googleapis.com`, `artifactregistry.googleapis.com` and `cloudbuild.googleapis.com` (setup-gcp.sh doesn't).
+2. **Secrets** in Secret Manager, labelled `service=engines`, readable by `engines-runtime` only:
    - `engines-database-url-dev` and `engines-database-url-prod`: `postgres://engines:<password>@/engines?host=/cloudsql/<connection name>`, the password from `engines-db-password-<env>`.
    - `engines-auth-secret-staging` and `engines-auth-secret-production`: `openssl rand -base64 32`, a different one each.
-   - `engines-google-client-secret`: the OAuth client's secret.
-2. **Staging's own buckets**: `gs://engines-staging-uploads` (2-day lifecycle), `gs://engines-staging-pages` and `gs://engines-staging-results` (30-day), labelled `service=engines`, `roles/storage.objectAdmin` for `engines-runtime` on each. In `.env`: `ENGINES_STAGING_BUCKET_UPLOADS`, `…_PAGES`, `…_RESULTS`.
-3. **CORS** on the uploads buckets, so the page's browser uploads can read the resumable protocol's `Range` header: `gcloud storage buckets update gs://engines-uploads --cors-file=cors.json`, allowing `PUBLIC_URL_PRODUCTION` (and staging's bucket `PUBLIC_URL_STAGING`), method `PUT`, response header `Range`.
-4. **`.env`**: `PUBLIC_URL_STAGING`, `PUBLIC_URL_PRODUCTION` (the services' URLs, or the domains mapped to them), `AI_MODEL`, `GOOGLE_CLIENT_ID`.
-5. **OAuth client**: add `<PUBLIC_URL>/api/auth/callback/google` for each environment as an authorised redirect URI.
+   - The OAuth client's secret is already `engines-google-oauth-client-secret` (setup-gcp.sh).
+3. **Staging's own buckets**: `gs://engines-staging-uploads` (2-day lifecycle), `gs://engines-staging-pages` and `gs://engines-staging-results` (30-day), labelled `service=engines`, `roles/storage.objectAdmin` for `engines-runtime` on each. In `.env`: `ENGINES_STAGING_BUCKET_UPLOADS`, `…_PAGES`, `…_RESULTS`.
+4. **CORS** on the uploads buckets, so the page's browser uploads can read the resumable protocol's `Range` header: `gcloud storage buckets update gs://engines-uploads --cors-file=cors.json`, allowing `PUBLIC_URL_PRODUCTION` (and staging's bucket `PUBLIC_URL_STAGING`), method `PUT`, response header `Range`.
+5. **`.env`**: `PUBLIC_URL_STAGING`, `PUBLIC_URL_PRODUCTION` (the services' URLs, or the domains mapped to them), `AI_MODEL`, `GOOGLE_CLIENT_ID`.
+6. **OAuth client**: add `<PUBLIC_URL>/api/auth/callback/google` for each environment as an authorised redirect URI.
 
 ## Staging
 

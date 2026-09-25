@@ -143,7 +143,8 @@ export async function scoreBooks({
   now = new Date(),
 }: ScoreOptions): Promise<Run> {
   const run: Run = {
-    id: `${now.toISOString().replace(/[:.]/g, "-")}-${reader.name}`,
+    // A file name too: model ids carry "/" and ":".
+    id: `${now.toISOString()}-${reader.name}`.replace(/[^\w.-]+/g, "-"),
     created_at: now.toISOString(),
     reader: reader.name,
     totals: emptyScores(),

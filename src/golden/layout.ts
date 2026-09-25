@@ -77,8 +77,12 @@ export function withLayout(
         inputTokens: 0,
         outputTokens: 0,
         costUsd: layout.costUsd,
-        ok: true,
-        error: null,
+        // An add-on that found nothing would quietly score as the model alone.
+        ok: layout.pageNumber !== null || layout.regions.length > 0,
+        error:
+          layout.pageNumber === null && layout.regions.length === 0
+            ? "the add-on returned no page number and no regions"
+            : null,
       });
       return mergeLayout(reading, layout);
     },
