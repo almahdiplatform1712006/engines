@@ -10,6 +10,7 @@ import type { OutlineNode } from "../contract/outline.ts";
 import { checkPages } from "../offset/fit.ts";
 import { pdfToPrinted, type OffsetSegment } from "../offset/segments.ts";
 import type { BlockKind, PageReading } from "../reading/blocks.ts";
+import { applyJoins, type Join } from "./continuations.ts";
 import { place, type Placed } from "./placement.ts";
 import type { ResultBody, StoredQuestion, StoredStimulus } from "./result.ts";
 import { indexTree } from "./tree-index.ts";
@@ -27,6 +28,8 @@ export interface AssemblyInput {
   pages: readonly PageReading[];
   /** Pages whose read failed after every retry. */
   failedPages: readonly FailedPage[];
+  /** Blocks re-read across a page break (step 4), replacing their halves. */
+  joins?: readonly Join[];
 }
 
 /** Which block kinds each document type delivers. The rest are `off_type`. */
@@ -58,7 +61,10 @@ export function assemble(input: AssemblyInput): ResultBody {
     });
   }
 
-  const pages = [...input.pages].sort((a, b) => a.pdf_page - b.pdf_page);
+  // Step 4: joined blocks replace their halves.
+  const pages = applyJoins(input.pages, input.joins ?? []).sort(
+    (a, b) => a.pdf_page - b.pdf_page,
+  );
   for (const page of pages) {
     result.skipped.neither += page.blocks.filter(
       (b) => b.kind === "neither",
@@ -108,7 +114,20 @@ export function assemble(input: AssemblyInput): ResultBody {
       result.skipped.off_type++;
       continue;
     }
-    if (kind === "question") result.questions.push(toQuestion(item));
+    if (kind === "question") {
+      const question = toQuestion(item);
+      // A question cut off at a page break, with no join, that is too broken to
+      // answer is not delivered as an item: it's an incomplete_question failure.
+      if (question.review_reason === "cut_off" && !answerable(question)) {
+        result.failures.push({
+          reason: "incomplete_question",
+          locator: item.locator,
+          detail: `question ${question.number ?? "(no number)"} is cut off at a page break: «${question.text.slice(0, 80)}»`,
+        });
+      } else {
+        result.questions.push(question);
+      }
+    }
     if (kind === "passage") result.stimuli.push(toStimulus(item));
   }
 
@@ -126,9 +145,12 @@ function toQuestion(item: Placed): StoredQuestion {
   const q = block.question;
   if (q === null)
     throw new Error(`block ${block.id} is a question without question fields`);
-  const flags = [item.flag, block.repaired === null ? null : "repaired"].filter(
-    (f) => f !== null,
-  );
+  const flags = [
+    // A block still flagged as running across a page break was never joined.
+    block.continues || block.continued_from ? "cut_off" : null,
+    item.flag,
+    block.repaired === null ? null : "repaired",
+  ].filter((f) => f !== null);
   return {
     id: itemId("q", block.id),
     type: q.type,
@@ -162,4 +184,11 @@ function toStimulus(item: Placed): StoredStimulus {
     pages: [block.pdf_page],
     image: null,
   };
+}
+
+/** Enough of a question survives to answer it: a stem, and options where its type needs them. */
+function answerable(question: StoredQuestion): boolean {
+  if (question.text.trim() === "") return false;
+  if (question.type === "multiple_choice") return question.options.length >= 2;
+  return true;
 }

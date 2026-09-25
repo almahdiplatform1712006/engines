@@ -1,6 +1,11 @@
 // A PageReader that returns prepared pages instead of calling a model. The
 // pipeline's integration tests run on it, so CI needs no model key.
-import { toPageReading, type ModelPage } from "./blocks.ts";
+import {
+  toBlock,
+  toPageReading,
+  type ModelBlock,
+  type ModelPage,
+} from "./blocks.ts";
 import type { PageReader, RecordCall } from "./reader.ts";
 
 export interface Script {
@@ -13,12 +18,16 @@ export interface Script {
    * `printed_page`; set a page here to make the cheap read disagree.
    */
   numbers?: Record<number, string | null>;
+  /** The joined block a pair re-read returns, by the pair's first PDF page. */
+  joins?: Record<number, ModelBlock>;
   record?: RecordCall;
 }
 
-export function scriptedReader(
-  script: Script,
-): PageReader & { reads: number[]; numberReads: number[] } {
+export function scriptedReader(script: Script): PageReader & {
+  reads: number[];
+  numberReads: number[];
+  pairReads: number[];
+} {
   const failuresLeft = new Map(
     Object.entries(script.failures ?? {}).map(([page, count]) => [
       Number(page),
@@ -27,9 +36,20 @@ export function scriptedReader(
   );
   const reads: number[] = [];
   const numberReads: number[] = [];
+  const pairReads: number[] = [];
   return {
     reads,
     numberReads,
+    pairReads,
+    readPair(_images, [first]) {
+      pairReads.push(first.pdf_page);
+      const joined = script.joins?.[first.pdf_page];
+      if (!joined)
+        return Promise.reject(
+          new Error(`no scripted join for page ${String(first.pdf_page)}`),
+        );
+      return Promise.resolve(toBlock(first.pdf_page, first.order, joined));
+    },
     readPrintedNumber(image) {
       numberReads.push(image.pdfPage);
       const number = script.numbers?.[image.pdfPage];

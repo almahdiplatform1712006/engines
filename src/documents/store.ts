@@ -25,6 +25,8 @@ export interface DocumentRow {
   webhook_url: string | null;
   page_count: number | null;
   pages_pending: number;
+  tasks_pending: number;
+  stage: "read" | "pair" | "solve" | "finish";
   offset_segments: OffsetSegment[] | null;
   offset_mode: "confirm" | "auto";
   offset_agreement: number | null;

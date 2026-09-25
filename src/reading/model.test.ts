@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mcq, mockModel, page } from "../../test/model.ts";
+import { toBlock } from "./blocks.ts";
 import { createModelReader } from "./model.ts";
 import type { ModelCall } from "./reader.ts";
 
@@ -85,4 +86,37 @@ test("a length stop is retried with a higher output limit", async () => {
 test("still cut off at the highest limit fails the page", async () => {
   const { reader: r } = reader([{ text: "{", finishReason: "length" }]);
   await assert.rejects(r.readPage(image, context), /cut off/);
+});
+
+test("a pair re-read sends both images and returns the joined block on the first page", async () => {
+  const joined = mcq("5", "السؤال كاملا");
+  const { reader: r, model } = reader([
+    {
+      text: JSON.stringify({
+        pages: [
+          { page: 40, blocks: [joined] },
+          { page: 41, blocks: [] },
+        ],
+      }),
+    },
+  ]);
+  const halves = [
+    toBlock(40, 3, { ...mcq("5", "السؤال"), continues: true }),
+    toBlock(41, 0, { ...mcq("5", "كاملا"), continued_from: true }),
+  ] as const;
+
+  const block = await r.readPair(
+    [
+      { ...image, pdfPage: 40 },
+      { ...image, pdfPage: 41 },
+    ],
+    halves,
+    context,
+  );
+
+  assert.equal(block.id, "p40#3");
+  assert.equal(block.text, "السؤال كاملا");
+  const content = model.doGenerateCalls[0]?.prompt.at(-1)?.content;
+  assert.ok(Array.isArray(content));
+  assert.equal(content.filter((part) => part.type === "file").length, 2);
 });

@@ -3,6 +3,20 @@
 
 export const READ_NUMBER = `This is one page of a book, as an image. Return the page number printed on it (usually in a corner or at the bottom centre), exactly as printed, including Arabic-Indic digits. Return null if there is no printed page number. Ignore chapter, lesson, question and figure numbers.`;
 
+/** Step 4. The halves are described so the model knows which block to join. */
+export function readPair(
+  first: { page: number; kind: string; text: string },
+  second: { page: number; text: string },
+): string {
+  return `You are reading two consecutive pages of a school book, as two images: page ${String(first.page)} then page ${String(second.page)}.
+
+A ${first.kind} starts at the bottom of page ${String(first.page)} and continues at the top of page ${String(second.page)}.
+It starts: «${first.text.slice(0, 300)}»
+It continues: «${second.text.slice(0, 300)}»
+
+Return that one ${first.kind}, whole and joined, as the only block in the entry for page ${String(first.page)}. Leave the entry for page ${String(second.page)} with no blocks. Follow the same rules as for a single page: copy text exactly, math as LaTeX, options with their printed labels, box_2d on page ${String(first.page)}.`;
+}
+
 export const READ_PAGE = `You are reading one page of a school book, as an image. The book may be Arabic (right-to-left), English, or both.
 
 Return every block on the page, in reading order, labelled:

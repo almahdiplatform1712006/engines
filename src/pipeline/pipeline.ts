@@ -1,162 +1,31 @@
 // The document pipeline (spec #1 §4, ADR 0001): the stage machine that takes a
-// document from `queued` to a finished result. Each stage is a pg-boss queue.
+// document from `queued` to a finished result. Each step is a pg-boss queue.
 //
-//   admit ──► render ──► page.read × pages ──► finish
+//   admit ──► render + quick pass ──► awaiting_offset ──► page.read × pages
+//         ──► advance: pair re-reads, model answers ──► finish
 //
-// Page tasks settle through `settlePage`, which counts them down in the same
-// transaction that records the page; the task that reaches zero starts finish.
-// A task that crashes or runs out of retries reaches its dead-letter queue, whose
-// handler settles it as failed, so a document never waits on a lost page.
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { PgBoss } from "pg-boss";
-import { assemble, type FailedPage } from "../assembly/assemble.ts";
-import { loadDocument, type DocumentRow } from "../documents/store.ts";
+// Tasks settle once, counting the document down in the same transaction that
+// records them; the one that reaches zero moves the document on. A task that
+// crashes or runs out of retries reaches its dead-letter queue, whose handler
+// settles it as failed, so a document never waits on a lost task.
+import { advance, failDocument, runTask, taskDied } from "./advance.ts";
 import {
-  autoApprovable,
-  fitSegments,
-  samplePages,
-  type Fit,
-} from "../offset/fit.ts";
-import {
-  IDENTITY,
-  segmentProblems,
-  type OffsetSegment,
-} from "../offset/segments.ts";
-import { pageLabels } from "../render/labels.ts";
-import { Refusal } from "../shared/refusal.ts";
-import { parsePrintedNumber } from "../shared/text.ts";
-import { getOutline } from "../outline/store.ts";
-import type { PageReading } from "../reading/blocks.ts";
-import type { PageReader } from "../reading/reader.ts";
-import {
-  normalisePhoto,
-  pageCount,
-  renderPage,
-  type RenderedPage,
-} from "../render/render.ts";
-import { TruncatedOutputError } from "../reading/model.ts";
-import type { Clock } from "../shared/clock.ts";
-import type { Provider } from "../shared/config.ts";
-import type { Db, Queryable } from "../shared/db/pool.ts";
-import type { BlobStore } from "../storage/store.ts";
+  createQueues,
+  DEFAULT_OPTIONS,
+  queues,
+  type DocumentJob,
+  type PageJob,
+  type PipelineDeps,
+  type PipelineOptions,
+  type TaskJob,
+} from "./deps.ts";
+import { readPage, settlePage } from "./read.ts";
+import { render } from "./render.ts";
 
-export const queues = {
-  render: "document.render",
-  renderDead: "document.render.dead",
-  readPage: "page.read",
-  readPageDead: "page.read.dead",
-  finish: "document.finish",
-  finishDead: "document.finish.dead",
-} as const;
-
-export interface PipelineDeps {
-  db: Db;
-  boss: PgBoss;
-  store: BlobStore;
-  clock: Clock;
-  /** The page reader for a key's provider. */
-  reader(provider: Provider): PageReader;
-}
-
-export interface PipelineOptions {
-  /** Page tasks one worker runs at once. */
-  pageConcurrency: number;
-  /** Seconds before the first retry of a failed task (backoff doubles it). */
-  retryDelay: number;
-  /** Attempts per page before it becomes `part_failed`. */
-  pageAttempts: number;
-  /** How often an idle worker polls each queue. */
-  pollingIntervalSeconds: number;
-}
-
-export const DEFAULT_OPTIONS: PipelineOptions = {
-  pageConcurrency: 4,
-  retryDelay: 5,
-  pageAttempts: 3,
-  pollingIntervalSeconds: 2,
-};
-
-interface DocumentJob {
-  documentId: string;
-}
-interface PageJob {
-  documentId: string;
-  pdfPage: number;
-}
-
-/** pg-boss runs inside our transaction when handed one of these. */
-export function inTransaction(tx: Queryable) {
-  return {
-    executeSql: (text: string, values?: unknown[]) => tx.query(text, values),
-  };
-}
-
-/** Creates the queues. The API calls this too, since it sends render jobs. */
-export async function createQueues(
-  boss: PgBoss,
-  options: PipelineOptions = DEFAULT_OPTIONS,
-): Promise<void> {
-  for (const dead of [
-    queues.renderDead,
-    queues.readPageDead,
-    queues.finishDead,
-  ]) {
-    await boss.createQueue(dead, {
-      retryLimit: 5,
-      retryDelay: 10,
-      retryBackoff: true,
-    });
-  }
-  await boss.createQueue(queues.render, {
-    retryLimit: 2,
-    retryDelay: options.retryDelay,
-    retryBackoff: true,
-    expireInSeconds: 3600,
-    deadLetter: queues.renderDead,
-  });
-  await boss.createQueue(queues.readPage, {
-    retryLimit: options.pageAttempts - 1,
-    retryDelay: options.retryDelay,
-    retryBackoff: true,
-    expireInSeconds: 600,
-    deadLetter: queues.readPageDead,
-  });
-  await boss.createQueue(queues.finish, {
-    policy: "exclusive",
-    retryLimit: 3,
-    retryDelay: options.retryDelay,
-    retryBackoff: true,
-    expireInSeconds: 1800,
-    deadLetter: queues.finishDead,
-  });
-}
-
-/**
- * Starts the key's queued documents. E-05 admits everything; E-13 adds the
- * per-key cap. Runs inside the caller's transaction.
- */
-export async function admit(
-  boss: PgBoss,
-  tx: Queryable,
-  apiKeyId: string,
-): Promise<void> {
-  const { rows } = await tx.query<{ id: string }>(
-    `UPDATE documents SET status = 'rendering', started_at = now()
-     WHERE id IN (
-       SELECT id FROM documents WHERE api_key_id = $1 AND status = 'queued'
-       ORDER BY created_at FOR UPDATE SKIP LOCKED
-     )
-     RETURNING id`,
-    [apiKeyId],
-  );
-  for (const { id } of rows) {
-    await boss.send(queues.render, { documentId: id } satisfies DocumentJob, {
-      db: inTransaction(tx),
-    });
-  }
-}
+export { admit } from "./admit.ts";
+export { createQueues, DEFAULT_OPTIONS, queues } from "./deps.ts";
+export type { PipelineDeps, PipelineOptions } from "./deps.ts";
+export { confirmOffset } from "./offset.ts";
 
 export async function registerPipeline(
   deps: PipelineDeps,
@@ -165,6 +34,7 @@ export async function registerPipeline(
   const { boss } = deps;
   await createQueues(boss, options);
   const poll = { pollingIntervalSeconds: options.pollingIntervalSeconds };
+  const busy = { ...poll, localConcurrency: options.pageConcurrency };
 
   await boss.work<DocumentJob>(queues.render, poll, async ([job]) => {
     if (job) await render(deps, job.data.documentId);
@@ -177,13 +47,9 @@ export async function registerPipeline(
         "the book could not be rendered",
       );
   });
-  await boss.work<PageJob>(
-    queues.readPage,
-    { ...poll, localConcurrency: options.pageConcurrency },
-    async ([job]) => {
-      if (job) await readPage(deps, job.data);
-    },
-  );
+  await boss.work<PageJob>(queues.readPage, busy, async ([job]) => {
+    if (job) await readPage(deps, job.data);
+  });
   await boss.work<PageJob>(queues.readPageDead, poll, async ([job]) => {
     if (!job) return;
     const { rows } = await deps.db.query<{ error: string | null }>(
@@ -195,10 +61,16 @@ export async function registerPipeline(
       error: rows[0]?.error ?? "the page task stopped",
     });
   });
-  await boss.work<DocumentJob>(queues.finish, poll, async ([job]) => {
-    if (job) await finish(deps, job.data.documentId);
+  await boss.work<TaskJob>(queues.task, busy, async ([job]) => {
+    if (job) await runTask(deps, job.data);
   });
-  await boss.work<DocumentJob>(queues.finishDead, poll, async ([job]) => {
+  await boss.work<TaskJob>(queues.taskDead, poll, async ([job]) => {
+    if (job) await taskDied(deps, job.data);
+  });
+  await boss.work<DocumentJob>(queues.advance, poll, async ([job]) => {
+    if (job) await advance(deps, job.data.documentId);
+  });
+  await boss.work<DocumentJob>(queues.advanceDead, poll, async ([job]) => {
     if (job)
       await failDocument(
         deps,
@@ -206,411 +78,4 @@ export async function registerPipeline(
         "the result could not be assembled",
       );
   });
-}
-
-/**
- * Step 1: one PNG per page, stored and reused by every later step. Resumable: a
- * retry skips pages already rendered, so a crash never renders a book twice.
- * Then step 1b, the quick pass, which proposes the offset.
- */
-async function render(deps: PipelineDeps, documentId: string): Promise<void> {
-  const doc = await loadDocument(deps.db, documentId);
-  if (doc.status !== "rendering") return;
-
-  const done = new Set(
-    (
-      await deps.db.query<{ pdf_page: number }>(
-        "SELECT pdf_page FROM pages WHERE document_id = $1",
-        [documentId],
-      )
-    ).rows.map((r) => r.pdf_page),
-  );
-  const addPage = async (
-    pdfPage: number,
-    label: string | null,
-    make: () => Promise<RenderedPage>,
-  ) => {
-    if (done.has(pdfPage)) return;
-    const page = await make();
-    const key = `pages/${documentId}/${String(pdfPage)}.png`;
-    await deps.store.put(key, page.png, "image/png");
-    await deps.db.query(
-      `INSERT INTO pages (document_id, org_id, pdf_page, image_key, width, height, label)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`,
-      [documentId, doc.org_id, pdfPage, key, page.width, page.height, label],
-    );
-  };
-
-  let count: number;
-  if (doc.source.kind === "pdf") {
-    const dir = await mkdtemp(join(tmpdir(), "engines-book-"));
-    try {
-      const file = join(dir, "book.pdf");
-      const bytes = await deps.store.get(doc.source.storage_key);
-      await writeFile(file, bytes);
-      count = await pageCount(file);
-      const labels = await pageLabels(bytes);
-      for (let pdfPage = 1; pdfPage <= count; pdfPage++) {
-        await addPage(pdfPage, labels?.[pdfPage - 1] ?? null, () =>
-          renderPage(file, pdfPage),
-        );
-      }
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  } else {
-    const photos = doc.source.uploads;
-    count = photos.length;
-    for (const [i, photo] of photos.entries()) {
-      await addPage(i + 1, null, async () =>
-        normalisePhoto(await deps.store.get(photo.storage_key)),
-      );
-    }
-  }
-  await deps.db.query("UPDATE documents SET page_count = $2 WHERE id = $1", [
-    documentId,
-    count,
-  ]);
-
-  const fit = await quickPass(deps, doc, count);
-  await deps.db.transaction(async (tx) => {
-    const auto = doc.offset_mode === "auto" && autoApprovable(fit);
-    const segments = fit.segments.map((s) => ({ ...s, confirmed: auto }));
-    const moved = await tx.query(
-      `UPDATE documents SET status = 'awaiting_offset', offset_segments = $2, offset_agreement = $3
-       WHERE id = $1 AND status = 'rendering'`,
-      [documentId, JSON.stringify(segments), fit.agreement],
-    );
-    if (moved.rowCount === 1 && auto) {
-      await startReading(deps, tx, documentId, segments);
-    }
-  });
-}
-
-/**
- * Step 1b: read only the printed number on the sampled pages with the cheap
- * model, and fit the offset. Resumable like rendering: pages already read are
- * not read again. A page whose number can't be read counts as unnumbered.
- */
-async function quickPass(
-  deps: PipelineDeps,
-  doc: DocumentRow,
-  pageCount: number,
-): Promise<Fit> {
-  const sample = samplePages(pageCount);
-  const { rows } = await deps.db.query<{
-    pdf_page: number;
-    image_key: string;
-    quick_read: boolean;
-  }>(
-    `SELECT pdf_page, image_key, quick_read FROM pages
-     WHERE document_id = $1 AND pdf_page = ANY($2)`,
-    [doc.id, sample],
-  );
-  const reader = deps.reader(await providerOf(deps.db, doc.api_key_id));
-  const todo = rows.filter((page) => !page.quick_read);
-  await inBatches(todo, QUICK_PASS_CONCURRENCY, async (page) => {
-    let raw: string | null = null;
-    try {
-      raw = await reader.readPrintedNumber(
-        {
-          pdfPage: page.pdf_page,
-          bytes: await deps.store.get(page.image_key),
-          mediaType: "image/png",
-        },
-        { orgId: doc.org_id, documentId: doc.id },
-      );
-    } catch (error) {
-      console.error(`quick pass: page ${String(page.pdf_page)}`, error);
-    }
-    await deps.db.query(
-      `UPDATE pages SET quick_read = true, quick_raw = $3, quick_number = $4
-       WHERE document_id = $1 AND pdf_page = $2`,
-      [doc.id, page.pdf_page, raw, parsePrintedNumber(raw)],
-    );
-  });
-
-  // The quick reads, plus the PDF's own labels on the pages not sampled.
-  const evidence = await deps.db.query<{
-    pdf_page: number;
-    quick_read: boolean;
-    quick_number: number | null;
-    label: string | null;
-  }>(
-    "SELECT pdf_page, quick_read, quick_number, label FROM pages WHERE document_id = $1",
-    [doc.id],
-  );
-  return fitSegments(
-    evidence.rows.flatMap((page) => {
-      if (page.quick_read) {
-        return [{ pdf_page: page.pdf_page, printed: page.quick_number }];
-      }
-      const labelled = parsePrintedNumber(page.label);
-      return labelled === null
-        ? []
-        : [{ pdf_page: page.pdf_page, printed: labelled }];
-    }),
-  );
-}
-
-const QUICK_PASS_CONCURRENCY = 4;
-
-async function inBatches<T>(
-  items: readonly T[],
-  size: number,
-  work: (item: T) => Promise<void>,
-): Promise<void> {
-  for (let i = 0; i < items.length; i += size) {
-    await Promise.all(items.slice(i, i + size).map(work));
-  }
-}
-
-async function providerOf(db: Queryable, apiKeyId: string): Promise<Provider> {
-  const { rows } = await db.query<{ provider: Provider }>(
-    "SELECT provider FROM api_keys WHERE id = $1",
-    [apiKeyId],
-  );
-  return rows[0]?.provider ?? "openrouter";
-}
-
-/**
- * `POST /v1/documents/{id}/offset`: accepts the proposed segments, or replaces
- * them with the uploader's corrections, and starts the full read.
- */
-export async function confirmOffset(
-  deps: Pick<PipelineDeps, "db" | "boss" | "clock">,
-  orgId: string,
-  documentId: string,
-  corrected: readonly { printed_from: number; pdf_from: number }[] | undefined,
-): Promise<void> {
-  await deps.db.transaction(async (tx) => {
-    const { rows } = await tx.query<{
-      status: string;
-      offset_segments: OffsetSegment[] | null;
-    }>(
-      "SELECT status, offset_segments FROM documents WHERE id = $1 AND org_id = $2 FOR UPDATE",
-      [documentId, orgId],
-    );
-    const doc = rows[0];
-    if (!doc) throw new Refusal("not_found", `No document ${documentId}.`);
-    if (doc.status !== "awaiting_offset") {
-      throw new Refusal(
-        "wrong_state",
-        `The offset can only be confirmed while the document is awaiting_offset; it is ${doc.status}.`,
-      );
-    }
-    const segments = (corrected ?? doc.offset_segments ?? []).map((s) => ({
-      printed_from: s.printed_from,
-      pdf_from: s.pdf_from,
-      confirmed: true,
-    }));
-    if (segments.length === 0) {
-      throw new Refusal(
-        "invalid_request",
-        'No page numbers were found to propose an offset. Send `segments`, for example [{ "printed_from": 1, "pdf_from": 5 }].',
-      );
-    }
-    const problems = segmentProblems(segments);
-    if (problems.length > 0) {
-      throw new Refusal("invalid_request", problems.join(" "), {
-        details: { problems },
-      });
-    }
-    await tx.query(
-      "UPDATE documents SET offset_segments = $2, offset_confirmed_at = $3 WHERE id = $1",
-      [documentId, JSON.stringify(segments), deps.clock()],
-    );
-    await startReading(deps, tx, documentId, segments);
-  });
-}
-
-/** The offset is confirmed: queue one read task per page (step 2). */
-async function startReading(
-  deps: Pick<PipelineDeps, "boss">,
-  tx: Queryable,
-  documentId: string,
-  segments: readonly OffsetSegment[],
-): Promise<void> {
-  const pending = await tx.query<{ pdf_page: number }>(
-    "SELECT pdf_page FROM pages WHERE document_id = $1 AND state = 'pending' ORDER BY pdf_page",
-    [documentId],
-  );
-  await tx.query(
-    `UPDATE documents SET status = 'processing', pages_pending = $2, offset_segments = $3
-     WHERE id = $1`,
-    [documentId, pending.rows.length, JSON.stringify(segments)],
-  );
-  for (const { pdf_page } of pending.rows) {
-    await deps.boss.send(
-      queues.readPage,
-      { documentId, pdfPage: pdf_page } satisfies PageJob,
-      { db: inTransaction(tx) },
-    );
-  }
-  if (pending.rows.length === 0) {
-    await startFinish(deps.boss, tx, documentId);
-  }
-}
-
-/** Enqueues the finish step in the caller's transaction; the queue keeps one per document. */
-async function startFinish(
-  boss: PgBoss,
-  tx: Queryable,
-  documentId: string,
-): Promise<void> {
-  await boss.send(queues.finish, { documentId } satisfies DocumentJob, {
-    singletonKey: documentId,
-    db: inTransaction(tx),
-  });
-}
-
-/** Step 2: read one page, one image per call. A failure throws, so pg-boss retries this page alone. */
-async function readPage(deps: PipelineDeps, job: PageJob): Promise<void> {
-  const { rows } = await deps.db.query<{
-    image_key: string;
-    state: string;
-    org_id: string;
-    provider: Provider;
-  }>(
-    `UPDATE pages p SET attempts = attempts + 1
-     FROM documents d JOIN api_keys k ON k.id = d.api_key_id
-     WHERE p.document_id = $1 AND p.pdf_page = $2 AND d.id = p.document_id
-     RETURNING p.image_key, p.state, p.org_id, k.provider`,
-    [job.documentId, job.pdfPage],
-  );
-  const page = rows[0];
-  if (page?.state !== "pending") return;
-
-  let reading: PageReading;
-  try {
-    const bytes = await deps.store.get(page.image_key);
-    reading = await deps
-      .reader(page.provider)
-      .readPage(
-        { pdfPage: job.pdfPage, bytes, mediaType: "image/png" },
-        { orgId: page.org_id, documentId: job.documentId },
-      );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    // Output that never fits won't fit on a retry either: fail the page now.
-    if (error instanceof TruncatedOutputError) {
-      await settlePage(deps, job, { state: "failed", error: message });
-      return;
-    }
-    await deps.db.query(
-      "UPDATE pages SET error = $3 WHERE document_id = $1 AND pdf_page = $2",
-      [job.documentId, job.pdfPage, message],
-    );
-    throw error;
-  }
-  await settlePage(deps, job, { state: "read", reading });
-}
-
-type PageOutcome =
-  { state: "read"; reading: PageReading } | { state: "failed"; error: string };
-
-/**
- * Records a page's outcome once (a redelivered task finds it settled and does
- * nothing) and counts the document's pending pages down in the same
- * transaction. Whoever settles the last page starts finish.
- */
-export async function settlePage(
-  deps: PipelineDeps,
-  job: PageJob,
-  outcome: PageOutcome,
-): Promise<void> {
-  await deps.db.transaction(async (tx) => {
-    const settled = await tx.query(
-      `UPDATE pages SET state = $3, reading = $4, printed_number = $5, error = $6
-       WHERE document_id = $1 AND pdf_page = $2 AND state = 'pending'`,
-      [
-        job.documentId,
-        job.pdfPage,
-        outcome.state,
-        outcome.state === "read" ? JSON.stringify(outcome.reading) : null,
-        outcome.state === "read" ? outcome.reading.printed_number : null,
-        outcome.state === "failed" ? outcome.error : null,
-      ],
-    );
-    if (settled.rowCount !== 1) return;
-    const { rows } = await tx.query<{ pages_pending: number }>(
-      "UPDATE documents SET pages_pending = pages_pending - 1 WHERE id = $1 RETURNING pages_pending",
-      [job.documentId],
-    );
-    if (rows[0]?.pages_pending === 0) {
-      await startFinish(deps.boss, tx, job.documentId);
-    }
-  });
-}
-
-/** Steps 3–10: assemble the result from the stored readings and write revision 1. */
-async function finish(deps: PipelineDeps, documentId: string): Promise<void> {
-  const doc = await loadDocument(deps.db, documentId);
-  if (doc.status !== "processing") return;
-
-  const outline = await getOutline(deps.db, doc.org_id, doc.outline_id);
-  if (!outline) throw new Error(`outline ${doc.outline_id} is missing`);
-  const pages = await deps.db.query<{
-    pdf_page: number;
-    state: "pending" | "read" | "failed";
-    reading: PageReading | null;
-    error: string | null;
-  }>(
-    "SELECT pdf_page, state, reading, error FROM pages WHERE document_id = $1",
-    [documentId],
-  );
-
-  const failedPages: FailedPage[] = pages.rows
-    .filter((p) => p.state !== "read")
-    .map((p) => ({ pdf_page: p.pdf_page, detail: p.error ?? "not read" }));
-  const readings = pages.rows.flatMap((p) =>
-    p.state === "read" && p.reading ? [p.reading] : [],
-  );
-
-  const result = assemble({
-    type: doc.type,
-    tree: outline.nodes,
-    segments: doc.offset_segments ?? IDENTITY,
-    pages: readings,
-    failedPages,
-  });
-  const status =
-    result.failures.length > 0 ? "completed_with_errors" : "completed";
-
-  await deps.db.transaction(async (tx) => {
-    await tx.query(
-      `INSERT INTO revisions (document_id, org_id, number, result) VALUES ($1, $2, 1, $3)
-       ON CONFLICT (document_id, number) DO NOTHING`,
-      [documentId, doc.org_id, JSON.stringify(result)],
-    );
-    await tx.query(
-      `UPDATE documents SET status = $2, revision = 1, finished_at = $3
-       WHERE id = $1 AND status = 'processing'`,
-      [documentId, status, deps.clock()],
-    );
-  });
-  await deleteBook(deps, doc);
-}
-
-async function failDocument(
-  deps: PipelineDeps,
-  documentId: string,
-  error: string,
-): Promise<void> {
-  const doc = await loadDocument(deps.db, documentId);
-  const { rowCount } = await deps.db.query(
-    `UPDATE documents SET status = 'failed', error = $2, finished_at = $3
-     WHERE id = $1 AND status NOT IN ('completed', 'completed_with_errors', 'failed')`,
-    [documentId, error, deps.clock()],
-  );
-  if (rowCount === 1) await deleteBook(deps, doc);
-}
-
-/** The book file is deleted when its job ends (spec §6). Page images stay for review. */
-async function deleteBook(deps: PipelineDeps, doc: DocumentRow): Promise<void> {
-  const keys =
-    doc.source.kind === "pdf"
-      ? [doc.source.storage_key]
-      : doc.source.uploads.map((u) => u.storage_key);
-  for (const key of keys) await deps.store.delete(key);
 }

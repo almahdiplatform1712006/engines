@@ -7,6 +7,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Hono } from "hono";
 import { createApiKey, createOrganisation } from "../src/accounts/keys.ts";
 import { createApp } from "../src/api/app.ts";
+import type { Document } from "../src/contract/document.ts";
 import type { PipelineOptions } from "../src/pipeline/pipeline.ts";
 import type { PageReader } from "../src/reading/reader.ts";
 import { systemClock, type Clock } from "../src/shared/clock.ts";
@@ -48,6 +49,17 @@ export interface Harness {
   newKey(
     orgName?: string,
   ): Promise<{ orgId: string; apiKeyId: string; key: string }>;
+  /**
+   * Runs a book end to end: upload, outline, confirm, document, then confirms
+   * printed = PDF page (or `segments`) and waits for the end.
+   */
+  runBook(book: {
+    pdf: Buffer;
+    nodes: unknown[];
+    type?: "questions" | "explanation" | "both";
+    segments?: { printed_from: number; pdf_from: number }[];
+    key?: string;
+  }): Promise<Document>;
   close(): Promise<void>;
 }
 
@@ -100,7 +112,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
       }),
     );
 
-  return {
+  const harness: Harness = {
     db,
     app,
     store,
@@ -141,6 +153,76 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
         `document ${documentId} stuck at ${String(last["status"])}, wanted ${statuses.join("|")}`,
       );
     },
+    async runBook(book) {
+      const key = book.key ?? me.key;
+      const expect = async (response: Response, status: number) => {
+        const body = (await response.json()) as Record<string, unknown>;
+        if (response.status !== status) {
+          throw new Error(
+            `expected ${String(status)}, got ${String(response.status)}: ${JSON.stringify(body)}`,
+          );
+        }
+        return body;
+      };
+      const created = await call(
+        "POST",
+        "/v1/uploads",
+        {
+          filename: "book.pdf",
+          content_type: "application/pdf",
+          size: book.pdf.length,
+        },
+        key,
+      );
+      const upload = await expect(created, 201);
+      await app.request(String(upload["upload_url"]).replace(PUBLIC_URL, ""), {
+        method: "PUT",
+        body: book.pdf,
+      });
+      const outline = await expect(
+        await call(
+          "POST",
+          "/v1/outlines",
+          { source: { type: "manual", nodes: book.nodes } },
+          key,
+        ),
+        201,
+      );
+      const outlineId = String(outline["id"]);
+      await expect(
+        await call("POST", `/v1/outlines/${outlineId}/confirm`, undefined, key),
+        200,
+      );
+      const doc = await expect(
+        await call(
+          "POST",
+          "/v1/documents",
+          {
+            outline_id: outlineId,
+            type: book.type ?? "questions",
+            source: { upload_id: upload["id"] },
+          },
+          key,
+        ),
+        202,
+      );
+      const id = String(doc["id"]);
+      await harness.waitFor(id, ["awaiting_offset"]);
+      await expect(
+        await call(
+          "POST",
+          `/v1/documents/${id}/offset`,
+          { segments: book.segments ?? [{ printed_from: 1, pdf_from: 1 }] },
+          key,
+        ),
+        200,
+      );
+      return (await harness.waitFor(id, [
+        "completed",
+        "completed_with_errors",
+        "failed",
+      ])) as unknown as Document;
+    },
     async close() {
       await worker.stop();
       await db.close();
@@ -148,4 +230,5 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
       await rm(dir, { recursive: true, force: true });
     },
   };
+  return harness;
 }

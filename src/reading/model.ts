@@ -9,8 +9,8 @@ import {
   type ProviderMetadata,
 } from "ai";
 import { z } from "zod";
-import { ModelPage, toPageReading } from "./blocks.ts";
-import { READ_NUMBER, READ_PAGE } from "./prompts.ts";
+import { ModelBlock, ModelPage, toBlock, toPageReading } from "./blocks.ts";
+import { READ_NUMBER, READ_PAGE, readPair } from "./prompts.ts";
 import type {
   CallContext,
   ModelCall,
@@ -38,6 +38,15 @@ export interface ModelReaderOptions {
 }
 
 const DEFAULT_STEPS = [16_000, 32_000] as const;
+
+/** One object with both pages, so the model can't answer with two JSON objects. */
+const PairPages = z.object({
+  pages: z.array(z.object({ page: z.int(), blocks: z.array(ModelBlock) })),
+});
+
+export class NoJoinedBlockError extends Error {
+  override name = "NoJoinedBlockError";
+}
 
 const PrintedNumber = z.object({
   printed_page: z
@@ -132,6 +141,44 @@ export function createModelReader(options: ModelReaderOptions): PageReader {
         [{ type: "image", image: image.bytes, mediaType: image.mediaType }],
       );
       return printed_page;
+    },
+    async readPair(images, halves, context) {
+      const [firstImage, secondImage] = images;
+      const [first, second] = halves;
+      const { pages } = await call(
+        options.main,
+        "read_pair",
+        firstImage.pdfPage,
+        context,
+        PairPages,
+        [
+          READ_PAGE,
+          readPair(
+            { page: first.pdf_page, kind: first.kind, text: first.text },
+            { page: second.pdf_page, text: second.text },
+          ),
+        ].join("\n\n"),
+        [
+          {
+            type: "image",
+            image: firstImage.bytes,
+            mediaType: firstImage.mediaType,
+          },
+          {
+            type: "image",
+            image: secondImage.bytes,
+            mediaType: secondImage.mediaType,
+          },
+        ],
+      );
+      const joined =
+        pages.find((p) => p.page === first.pdf_page)?.blocks[0] ??
+        pages.flatMap((p) => p.blocks)[0];
+      if (!joined)
+        throw new NoJoinedBlockError(
+          `pair ${first.id} + ${second.id}: no joined block returned`,
+        );
+      return toBlock(first.pdf_page, first.order, joined);
     },
     async readPage(image, context) {
       const page = await call(
