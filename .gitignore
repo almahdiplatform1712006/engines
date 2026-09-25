@@ -1,4 +1,8 @@
+node_modules/
 # Local secrets and config (spec rule 3: no secrets in the repo)
 .env
 .env.*
 !.env.example
+*.log
+coverage/
+.claude/worktrees/
