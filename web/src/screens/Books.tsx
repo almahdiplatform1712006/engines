@@ -1,13 +1,12 @@
 // The organisation's books: every document, newest first, with its status.
 import { useEffect, useState } from "react";
-import { TERMINAL_STATUSES } from "../../../src/contract/document.ts";
 import { api } from "../api.ts";
+import { TERMINAL } from "../status.ts";
 import { fill, statusLabel, useI18n } from "../i18n.tsx";
 import { Link } from "../router.tsx";
 import type { Organisation } from "./OrganisationShell.tsx";
 
 const POLL_MS = 5000;
-const TERMINAL = new Set<string>(TERMINAL_STATUSES);
 
 interface Row {
   id: string;

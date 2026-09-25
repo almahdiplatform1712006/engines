@@ -556,3 +556,181 @@ input[aria-invalid="true"] {
   block-size: auto;
   border: 1px solid var(--line);
 }
+
+/* Review: the tree, the items, the page (stacked when narrow) */
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 64rem) {
+  main:has(.review-layout) {
+    max-inline-size: 100rem;
+  }
+
+  .review-layout {
+    grid-template-columns: minmax(12rem, 1fr) minmax(0, 2.2fr) minmax(0, 1.6fr);
+  }
+
+  .review-tree,
+  .review-page {
+    position: sticky;
+    inset-block-start: 1rem;
+    max-block-size: calc(100vh - 2rem);
+    overflow-y: auto;
+  }
+}
+
+.node-list {
+  list-style: none;
+  margin: 0;
+  padding-inline-start: 0.75rem;
+}
+
+.review-tree > .node-list {
+  padding-inline-start: 0;
+}
+
+.node-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  inline-size: 100%;
+  padding-block: 0.3rem;
+  padding-inline: 0.4rem;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  text-align: start;
+}
+
+.node-link.selected {
+  background: var(--notice);
+}
+
+.badge.flag {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.item {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-block-end: 0.75rem;
+}
+
+.item.flagged {
+  border-inline-start: 3px solid var(--danger);
+}
+
+.item header {
+  margin-block-end: 0.4rem;
+}
+
+.options {
+  list-style: none;
+  padding-inline-start: 0.5rem;
+}
+
+.options li.correct {
+  font-weight: bold;
+}
+
+.item-actions {
+  margin-block-start: 0.5rem;
+}
+
+.item-actions select {
+  max-inline-size: 12rem;
+}
+
+.stimulus-group {
+  border-inline-start: 3px solid var(--line);
+  padding-inline-start: 0.75rem;
+  margin-block-end: 1rem;
+}
+
+.stimulus {
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-block-end: 0.75rem;
+}
+
+.stimulus img,
+img.figure,
+img.page-image {
+  display: block;
+  max-inline-size: 100%;
+  block-size: auto;
+}
+
+.question-form textarea {
+  font: inherit;
+  min-block-size: 5rem;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.option-row input:not([type="checkbox"]) {
+  flex: 1 1 10rem;
+}
+
+.placeable {
+  border-block-start: 1px dashed var(--line);
+  padding-block: 0.5rem;
+}
+
+.rich math {
+  font-size: 1.05em;
+}
+
+.rich table {
+  inline-size: auto;
+}
+
+/* Crop box editing: image coordinates, so this area is left to right. */
+.crop-area {
+  position: relative;
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+}
+
+.crop-area img {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  pointer-events: none;
+}
+
+.crop-box {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: rgb(31 95 191 / 0.15);
+  cursor: move;
+}
+
+.crop-handle {
+  position: absolute;
+  inset-inline-end: -7px;
+  inset-block-end: -7px;
+  inline-size: 14px;
+  block-size: 14px;
+  background: var(--accent);
+  border-radius: 2px;
+  cursor: nwse-resize;
+}
+
+.chunk-figure {
+  margin-block: 0.5rem;
+  margin-inline: 0;
+}

@@ -11,6 +11,7 @@ import { examineBook } from "../documents/create.ts";
 import { liveDocument } from "../documents/store.ts";
 import type { Clock } from "../shared/clock.ts";
 import type { Db } from "../shared/db/pool.ts";
+import type { PageReading } from "../reading/blocks.ts";
 import type { BlobStore } from "../storage/store.ts";
 import { Refusal } from "../shared/refusal.ts";
 import { readBody, unauthorized } from "./errors.ts";
@@ -154,6 +155,27 @@ export function pageRoutes(
     if (!key) throw new Refusal("not_found", "No such page.");
     c.header("cache-control", "private, max-age=300");
     return c.redirect(await store.signedUrl(key, PAGE_URL_SECONDS), 302);
+  });
+
+  // The questions the model read on a page, for placing what wasn't placed.
+  page.get("/documents/:id/pages/:page/questions", async (c) => {
+    const orgId = organisation(c.var.session);
+    const row = await liveDocument(db, orgId, c.req.param("id"));
+    const { rows } = await db.query<{ reading: PageReading | null }>(
+      "SELECT reading FROM pages WHERE document_id = $1 AND pdf_page = $2",
+      [row.id, Number(c.req.param("page")) || 0],
+    );
+    const blocks = rows[0]?.reading?.blocks ?? [];
+    return c.json({
+      object: "list",
+      data: blocks
+        .filter((b) => b.kind === "question" && b.question)
+        .map((b) => ({
+          block_id: b.id,
+          number: b.question?.number ?? null,
+          text: b.text,
+        })),
+    });
   });
 
   page.delete("/keys/:id", async (c) => {

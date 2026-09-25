@@ -128,7 +128,10 @@ export async function documentView(
   const body = latest?.result;
   const url = async (image: StoredImage | null) =>
     image?.key
-      ? { url: await store.signedUrl(image.key, IMAGE_URL_TTL_SECONDS) }
+      ? {
+          url: await store.signedUrl(image.key, IMAGE_URL_TTL_SECONDS),
+          pdf_page: image.pdf_page,
+        }
       : null;
 
   const document: Document = {
@@ -200,7 +203,10 @@ async function withPageImages(
       return {
         ...failure,
         page_image: key
-          ? { url: await store.signedUrl(key, IMAGE_URL_TTL_SECONDS) }
+          ? {
+              url: await store.signedUrl(key, IMAGE_URL_TTL_SECONDS),
+              pdf_page: failure.locator.pdf_page,
+            }
           : null,
       };
     }),

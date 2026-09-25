@@ -3,11 +3,13 @@
 // `image_unreadable` failure; its item is flagged, never dropped.
 import type { ResultBody, StoredImage } from "../assembly/result.ts";
 import { cropImage } from "../render/crop.ts";
-import { messageOf, type PipelineDeps } from "./deps.ts";
+import type { Queryable } from "../shared/db/pool.ts";
+import type { BlobStore } from "../storage/store.ts";
+import { messageOf } from "./deps.ts";
 import { loadPageImage } from "./pages.ts";
 
 export async function cutCrops(
-  deps: Pick<PipelineDeps, "db" | "store">,
+  deps: { db: Queryable; store: BlobStore },
   documentId: string,
   result: ResultBody,
   revision = 1,

@@ -1,7 +1,6 @@
-// Math for exports (spec #1 §5 Math): LaTeX → MathML with Temml for HTML and
-// PDF (`dir="rtl"` where the book writes math right-to-left), and MathML →
-// Word's own equations (OMML, through the docx library) so math in a .docx
-// stays editable. Math is copied exactly as printed, never translated.
+// Math for exports (spec #1 §5 Math): MathML → Word's own equations (OMML,
+// through the docx library) so math in a .docx stays editable. LaTeX →
+// MathML (Temml) is in shared/rich-text.ts, which the page uses too. Math is copied exactly as printed, never translated.
 import {
   MathFraction,
   MathRadical,
@@ -14,21 +13,7 @@ import {
 import { XMLParser } from "fast-xml-parser";
 import temml from "temml";
 
-export function toMathML(
-  tex: string,
-  options: { display: boolean; rtl: boolean },
-): string {
-  try {
-    const mathml = temml.renderToString(tex, {
-      displayMode: options.display,
-      throwOnError: true,
-    });
-    return options.rtl ? mathml.replace(/^<math/, '<math dir="rtl"') : mathml;
-  } catch {
-    // The checks flagged it already (latex_invalid); show the source rather than lose it.
-    return `<code dir="ltr">${escapeHtml(tex)}</code>`;
-  }
-}
+export { escapeHtml, toMathML } from "../shared/rich-text.ts";
 
 type Node = Record<string, unknown>;
 
@@ -122,8 +107,4 @@ function convertOne(node: Node): MathComponent[] {
       // mrow, mstyle, mpadded, semantics…: their content, in order.
       return convert(kids);
   }
-}
-
-export function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (c) => `&#${String(c.charCodeAt(0))};`);
 }

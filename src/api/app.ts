@@ -9,6 +9,8 @@ import {
   ConfirmOffsetRequest,
   CreateDocumentRequest,
 } from "../contract/document.ts";
+import { CreateRevisionRequest } from "../contract/revision.ts";
+import { reviseDocument } from "../review/revise.ts";
 import {
   CreateOutlineRequest,
   ReplaceOutlineRequest,
@@ -226,6 +228,29 @@ export function createApp(deps: AppDeps): Hono {
     );
     const row = await liveDocument(db, c.var.caller.orgId, c.req.param("id"));
     return c.json(await documentView(db, store, row));
+  });
+
+  // Review's fixes as a new revision (E-18). The reply is the document as it
+  // is now, at its latest revision.
+  v1.post("/documents/:id/revisions", async (c) => {
+    const body = await readBody(c, CreateRevisionRequest);
+    const { orgId, userId } = c.var.caller;
+    const id = c.req.param("id");
+    await once(c, `POST /v1/documents/${id}/revisions`, body, async () => ({
+      status: 201,
+      body: {
+        revision: await reviseDocument(
+          deps,
+          orgId,
+          id,
+          body.base_revision,
+          body.changes,
+          userId,
+        ),
+      },
+    }));
+    const row = await liveDocument(db, orgId, id);
+    return c.json(await documentView(db, store, row), 201);
   });
 
   v1.get("/documents/:id/export", async (c) => {

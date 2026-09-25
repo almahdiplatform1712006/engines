@@ -39,7 +39,8 @@ export const Locator = z.object({
 });
 export type Locator = z.infer<typeof Locator>;
 
-export const Image = z.object({ url: z.string() });
+/** A crop of a book page: its signed link, and the PDF page it was cut from. */
+export const Image = z.object({ url: z.string(), pdf_page: z.int() });
 
 export const ReviewReason = z
   .string()
@@ -55,7 +56,8 @@ export const Question = z.object({
   options: z.array(z.object({ key: z.string(), text: z.string() })),
   correct: z.array(z.string()),
   accepted_answers: z.array(z.string()),
-  answer_source: z.enum(["book", "marked", "model"]).nullable(),
+  /** Where the correct answer came from; `review` when a person set it. */
+  answer_source: z.enum(["book", "marked", "model", "review"]).nullable(),
   node_id: z.string(),
   node_path: z.array(z.string()),
   external_ref: z.string().nullable(),

@@ -2,11 +2,9 @@
 // then watch the book being read. Polls the document; nothing here needs the
 // page to stay open.
 import { useEffect, useState } from "react";
-import {
-  TERMINAL_STATUSES,
-  type Document,
-} from "../../../src/contract/document.ts";
+import type { Document } from "../../../src/contract/document.ts";
 import { api } from "../api.ts";
+import { TERMINAL } from "../status.ts";
 import { fill, statusLabel, useI18n } from "../i18n.tsx";
 import { NumberInput } from "../NumberInput.tsx";
 import { Link } from "../router.tsx";
@@ -14,7 +12,6 @@ import type { Organisation } from "./OrganisationShell.tsx";
 import { permanent, plain } from "../errors.ts";
 
 const POLL_MS = 2000;
-const TERMINAL = new Set<string>(TERMINAL_STATUSES);
 const EXPORTS = ["xlsx", "docx", "pdf", "json"] as const;
 
 export function DocumentView(props: {

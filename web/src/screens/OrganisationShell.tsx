@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import type { Me } from "../api.ts";
 import { useI18n } from "../i18n.tsx";
 import { Link } from "../router.tsx";
@@ -11,6 +12,11 @@ import { UploadBook } from "./UploadBook.tsx";
 import { Usage } from "./Usage.tsx";
 
 export type Organisation = Me["organisations"][number];
+
+// Review renders math (Temml), which only it needs: loaded when it's opened.
+const Review = lazy(() =>
+  import("./Review.tsx").then((m) => ({ default: m.Review })),
+);
 
 const TABS = ["books", "new", "keys", "members", "usage"] as const;
 
@@ -61,6 +67,17 @@ export function OrganisationShell(props: {
           organisation={organisation}
           documentId={props.rest[0] ?? ""}
         />
+      );
+      break;
+    case "review":
+      screen = (
+        <Suspense fallback={<p className="muted">{t.loading}</p>}>
+          <Review
+            key={`${key}/${props.rest[0] ?? ""}`}
+            organisation={organisation}
+            documentId={props.rest[0] ?? ""}
+          />
+        </Suspense>
       );
       break;
     case "keys":
