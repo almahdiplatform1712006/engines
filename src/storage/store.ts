@@ -7,6 +7,8 @@ export interface BlobStore {
   get(key: string): Promise<Buffer>;
   /** Size of a finished object, or null when it doesn't exist (yet). */
   size(key: string): Promise<number | null>;
+  /** Bytes `start` to `end` (exclusive) of an object, without reading the rest. */
+  readRange(key: string, start: number, end: number): Promise<Buffer>;
   /** A fingerprint of the object's bytes (MD5 as storage reports it), or null. */
   fingerprint(key: string): Promise<string | null>;
   delete(key: string): Promise<void>;

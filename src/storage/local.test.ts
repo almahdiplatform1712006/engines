@@ -84,3 +84,24 @@ test("a resumable upload continues from where it stopped", async () => {
     "0123456789",
   );
 });
+
+test("a resumable upload larger than Cloud Run's 32 MB request cap, in chunks", async () => {
+  const size = 33 * 1024 * 1024;
+  const bytes = Buffer.alloc(size, 7);
+  const url = path(
+    await store.createUpload("uploads/org_1/big", "application/pdf", size),
+  );
+  const chunk = 8 * 1024 * 1024;
+  for (let start = 0; start < size; start += chunk) {
+    const end = Math.min(size, start + chunk);
+    const response = await store.routes.request(url, {
+      method: "PUT",
+      headers: {
+        "content-range": `bytes ${String(start)}-${String(end - 1)}/${String(size)}`,
+      },
+      body: bytes.subarray(start, end),
+    });
+    assert.equal(response.status, end === size ? 200 : 308);
+  }
+  assert.equal(await store.size("uploads/org_1/big"), size);
+});

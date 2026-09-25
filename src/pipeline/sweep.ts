@@ -4,14 +4,17 @@
 // - A processing document whose pages and tasks have all settled, but whose
 //   counters say otherwise (or whose advance was lost), is advanced.
 // - Keys with waiting documents and free slots are admitted.
+// - Documents, outlines and uploads past their expiry are removed (E-14).
 import { admitNext } from "./admit.ts";
 import { startAdvance, type PipelineDeps } from "./deps.ts";
+import { expire, type ExpiryReport } from "./expiry.ts";
 
 export const SWEEP_QUEUE = "pipeline.sweep";
 
 export interface SweepReport {
   advanced: number;
   admittedKeys: number;
+  expired: ExpiryReport;
 }
 
 export async function sweep(deps: PipelineDeps): Promise<SweepReport> {
@@ -37,5 +40,10 @@ export async function sweep(deps: PipelineDeps): Promise<SweepReport> {
   );
   for (const { api_key_id } of waiting.rows) await admitNext(deps, api_key_id);
 
-  return { advanced: settled.rows.length, admittedKeys: waiting.rows.length };
+  const expired = await expire(deps);
+  return {
+    advanced: settled.rows.length,
+    admittedKeys: waiting.rows.length,
+    expired,
+  };
 }

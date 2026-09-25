@@ -14,6 +14,7 @@ import type {
 import type { OffsetSegment } from "../offset/segments.ts";
 import { hasEntitlement } from "../accounts/entitlements.ts";
 import type { Queryable } from "../shared/db/pool.ts";
+import { Refusal } from "../shared/refusal.ts";
 import type { BlobStore } from "../storage/store.ts";
 
 export type DocumentSource =
@@ -40,6 +41,8 @@ export interface DocumentRow {
   offset_agreement: number | null;
   revision: number;
   error: string | null;
+  pages_billed: number | null;
+  expired_at: Date | null;
   created_at: Date;
   finished_at: Date | null;
   expires_at: Date;
@@ -58,6 +61,23 @@ export async function getDocumentRow(
     [id, orgId],
   );
   return rows[0] ?? null;
+}
+
+/** The organisation's document, refused as `not_found` or, past its 30 days, `gone` (410). */
+export async function liveDocument(
+  db: Queryable,
+  orgId: string,
+  id: string,
+): Promise<DocumentRow> {
+  const row = await getDocumentRow(db, orgId, id);
+  if (!row) throw new Refusal("not_found", `No document ${id}.`);
+  if (row.expired_at !== null) {
+    throw new Refusal(
+      "gone",
+      `Document ${id} expired on ${row.expired_at.toISOString()}; results are kept 30 days.`,
+    );
+  }
+  return row;
 }
 
 /** Any organisation's document: for the worker, which acts on the document itself. */
@@ -117,7 +137,8 @@ export async function documentView(
       pages_total: row.page_count,
       pages_read: progress.rows[0]?.read ?? 0,
     },
-    usage: { pages: body ? (row.page_count ?? 0) : 0 },
+    usage: { pages: row.pages_billed ?? 0 },
+    error: row.error,
     warning: row.warning,
     offset: row.offset_segments ?? [],
     offset_agreement: row.offset_agreement,

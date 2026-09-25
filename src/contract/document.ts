@@ -133,7 +133,13 @@ export const Document = z.object({
   created_at: z.string(),
   expires_at: z.string(),
   progress: z.object({ pages_total: z.int().nullable(), pages_read: z.int() }),
-  usage: z.object({ pages: z.int() }),
+  usage: z.object({
+    pages: z
+      .int()
+      .describe("Pages billed: the pages read, written when the job ends"),
+  }),
+  /** Why the document failed, when it did. */
+  error: z.string().nullable(),
   offset: z.array(OffsetSegment),
   warning: Warning.nullable(),
   /** Share of the quick pass's page numbers that agree with the proposed offset (0–1). */
@@ -151,7 +157,7 @@ export const CreateDocumentRequest = z.object({
   type: DocumentType,
   source: z.union([
     z.object({ upload_id: z.string() }),
-    z.object({ upload_ids: z.array(z.string()).min(1).max(800) }),
+    z.object({ upload_ids: z.array(z.string()).min(1) }),
   ]),
   language: z.enum(["ar", "en"]).optional(),
   /** "auto" pre-approves the proposed printed → PDF mapping when agreement is high. */

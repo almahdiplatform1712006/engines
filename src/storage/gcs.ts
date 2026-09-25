@@ -31,6 +31,10 @@ export function gcsStore(buckets: GcsBuckets, origin?: string): BlobStore {
         throw error;
       }
     },
+    async readRange(key, start, end) {
+      const [bytes] = await file(key).download({ start, end: end - 1 });
+      return bytes;
+    },
     async fingerprint(key) {
       try {
         const [metadata] = await file(key).getMetadata();

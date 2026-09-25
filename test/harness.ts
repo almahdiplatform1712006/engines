@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Hono } from "hono";
+import { grantCredits } from "../src/accounts/credits.ts";
 import { createApiKey, createOrganisation } from "../src/accounts/keys.ts";
 import { createApp } from "../src/api/app.ts";
 import type { Document } from "../src/contract/document.ts";
@@ -47,8 +48,10 @@ export interface Harness {
     timeoutMs?: number,
     key?: string,
   ): Promise<Record<string, unknown>>;
+  /** A new organisation and key; it starts with `credits` page credits (100 000 by default). */
   newKey(
     orgName?: string,
+    credits?: number,
   ): Promise<{ orgId: string; apiKeyId: string; key: string }>;
   /**
    * Runs a book end to end: upload, outline, confirm, document, then confirms
@@ -101,8 +104,9 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
     webhooks: { allowPrivate: true },
   });
 
-  const newKey = async (orgName = "Test organisation") => {
+  const newKey = async (orgName = "Test organisation", credits = 100_000) => {
     const orgId = await createOrganisation(db, orgName);
+    if (credits > 0) await grantCredits(db, orgId, credits, "test credits");
     const created = await createApiKey(db, orgId, "test");
     return { orgId, apiKeyId: created.id, key: created.key };
   };

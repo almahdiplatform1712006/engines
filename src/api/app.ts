@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { PgBoss } from "pg-boss";
+import { balance, ledger } from "../accounts/credits.ts";
 import { authenticate, type Caller } from "../accounts/keys.ts";
 import {
   ConfirmOffsetRequest,
@@ -10,7 +11,7 @@ import {
   ReplaceOutlineRequest,
 } from "../contract/outline.ts";
 import { createDocument } from "../documents/create.ts";
-import { documentView, getDocumentRow } from "../documents/store.ts";
+import { documentView, liveDocument } from "../documents/store.ts";
 import {
   confirmOutline,
   createOutline,
@@ -149,6 +150,15 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(response.body, response.status as 202);
   });
 
+  v1.get("/usage", async (c) => {
+    const { orgId } = c.var.caller;
+    return c.json({
+      object: "usage",
+      balance: await balance(db, orgId),
+      ledger: await ledger(db, orgId),
+    });
+  });
+
   v1.get("/webhook_secret", async (c) => {
     return c.json({
       object: "webhook_secret",
@@ -164,16 +174,12 @@ export function createApp(deps: AppDeps): Hono {
       c.req.param("id"),
       body.segments,
     );
-    const row = await getDocumentRow(db, c.var.caller.orgId, c.req.param("id"));
-    if (!row)
-      throw new Refusal("not_found", `No document ${c.req.param("id")}.`);
+    const row = await liveDocument(db, c.var.caller.orgId, c.req.param("id"));
     return c.json(await documentView(db, store, row));
   });
 
   v1.get("/documents/:id", async (c) => {
-    const row = await getDocumentRow(db, c.var.caller.orgId, c.req.param("id"));
-    if (!row)
-      throw new Refusal("not_found", `No document ${c.req.param("id")}.`);
+    const row = await liveDocument(db, c.var.caller.orgId, c.req.param("id"));
     return c.json(await documentView(db, store, row));
   });
 

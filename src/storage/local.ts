@@ -82,6 +82,16 @@ export function localStore(options: LocalStoreOptions): LocalStore {
         return null;
       }
     },
+    async readRange(key, start, end) {
+      const file = await open(pathOf(key), "r");
+      try {
+        const buffer = Buffer.alloc(Math.max(0, end - start));
+        const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
+        return buffer.subarray(0, bytesRead);
+      } finally {
+        await file.close();
+      }
+    },
     async fingerprint(key) {
       try {
         const hash = createHash("md5");

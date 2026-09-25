@@ -1,7 +1,9 @@
 // `POST /v1/documents`: every check a new document passes before it is queued
 // (spec #1 §3), then the insert and admission in one transaction.
 import type { PgBoss } from "pg-boss";
+import { holdCredits, requireSomeCredit } from "../accounts/credits.ts";
 import { requireEntitlement } from "../accounts/entitlements.ts";
+import { countPdfPages } from "../render/count.ts";
 import type { Caller } from "../accounts/keys.ts";
 import type { CreateDocumentRequest } from "../contract/document.ts";
 import { getOutline, markInUse } from "../outline/store.ts";
@@ -16,6 +18,9 @@ import { Refusal } from "../shared/refusal.ts";
 import type { BlobStore } from "../storage/store.ts";
 import { claimUploads, finishedUpload, PDF } from "../uploads/uploads.ts";
 import type { DocumentSource } from "./store.ts";
+
+/** A book may be up to 800 pages (spec decision Q35). */
+export const MAX_PAGES = 800;
 
 /** Results, page images and exports are kept this long (spec §1 step 8). */
 export const DOCUMENT_TTL_DAYS = 30;
@@ -58,6 +63,13 @@ export async function createDocument(
   if (request.webhook_url !== undefined)
     checkWebhookUrl(request.webhook_url, deps.webhooks);
   const source = await resolveSource(deps, caller.orgId, request.source);
+  const pageCount = await countPages(deps.store, source);
+  if (pageCount !== null && pageCount > MAX_PAGES) {
+    throw new Refusal(
+      "too_large",
+      `Books can be up to ${String(MAX_PAGES)} pages; this one has ${String(pageCount)}.`,
+    );
+  }
   const fileHash = await fingerprintOf(deps.store, source);
   const warning =
     fileHash === null
@@ -95,6 +107,10 @@ export async function createDocument(
       ],
     );
     await claimUploads(tx, id, uploadIds);
+    // 402 when the balance can't cover the book. A PDF pdf.js couldn't count
+    // is held when rendering has counted it.
+    if (pageCount !== null) await holdCredits(tx, caller.orgId, id, pageCount);
+    else await requireSomeCredit(tx, caller.orgId);
     await markInUse(tx, outline.id);
     await admit(deps.boss, tx, caller.apiKeyId);
     const { rows } = await tx.query<{ status: string }>(
@@ -192,4 +208,14 @@ async function sameFileWarning(
     document_id: earlier.id,
     processed_at: earlier.created_at.toISOString(),
   };
+}
+
+/** Pages in the book: photos one each, a PDF counted from storage. Null when unreadable. */
+async function countPages(
+  store: BlobStore,
+  source: DocumentSource,
+): Promise<number | null> {
+  if (source.kind === "images") return source.uploads.length;
+  const size = await store.size(source.storage_key);
+  return size === null ? null : countPdfPages(store, source.storage_key, size);
 }

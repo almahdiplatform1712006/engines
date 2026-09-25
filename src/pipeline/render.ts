@@ -18,7 +18,11 @@ import {
 } from "../render/render.ts";
 import { parsePrintedNumber } from "../shared/text.ts";
 import { inBatches, providerOf, type PipelineDeps } from "./deps.ts";
+import { holdCredits } from "../accounts/credits.ts";
+import { MAX_PAGES } from "../documents/create.ts";
+import { Refusal } from "../shared/refusal.ts";
 import { admit } from "./admit.ts";
+import { failDocument } from "./advance.ts";
 
 const QUICK_PASS_CONCURRENCY = 4;
 
@@ -66,6 +70,7 @@ export async function render(
       const bytes = await deps.store.get(doc.source.storage_key);
       await writeFile(file, bytes);
       count = await pageCount(file);
+      if (!(await withinLimits(deps, doc, count))) return;
       const labels = await pageLabels(bytes);
       for (let pdfPage = 1; pdfPage <= count; pdfPage++) {
         await addPage(pdfPage, labels?.[pdfPage - 1] ?? null, () =>
@@ -169,4 +174,39 @@ async function quickPass(
         : [{ pdf_page: page.pdf_page, printed: labelled }];
     }),
   );
+}
+
+/**
+ * poppler's page count against the limits (E-14): over 800 pages fails the
+ * document, and a book pdf.js couldn't count at creation is held now, or
+ * fails for want of credits. False when the document failed.
+ */
+async function withinLimits(
+  deps: PipelineDeps,
+  doc: DocumentRow,
+  count: number,
+): Promise<boolean> {
+  if (count > MAX_PAGES) {
+    await failDocument(
+      deps,
+      doc.id,
+      `too_large: the book has ${String(count)} pages; the limit is ${String(MAX_PAGES)}`,
+    );
+    return false;
+  }
+  const held = await deps.db.query(
+    "SELECT 1 FROM credit_ledger WHERE document_id = $1 AND kind = 'hold'",
+    [doc.id],
+  );
+  if (held.rows.length > 0) return true;
+  try {
+    await deps.db.transaction((tx) =>
+      holdCredits(tx, doc.org_id, doc.id, count),
+    );
+    return true;
+  } catch (error) {
+    if (!(error instanceof Refusal)) throw error;
+    await failDocument(deps, doc.id, `${error.code}: ${error.message}`);
+    return false;
+  }
 }

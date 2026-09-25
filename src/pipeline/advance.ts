@@ -12,6 +12,8 @@ import {
   type AssemblyInput,
   type FailedPage,
 } from "../assembly/assemble.ts";
+import { settleCredits } from "../accounts/credits.ts";
+import type { Queryable } from "../shared/db/pool.ts";
 import { enqueueWebhook } from "../webhooks/deliver.ts";
 import { admitNext } from "./admit.ts";
 import { cutCrops } from "./crops.ts";
@@ -327,6 +329,7 @@ async function finish(
       [doc.id, status, deps.clock()],
     );
     if (moved.rowCount !== 1) return false;
+    await settleCredits(tx, doc.org_id, doc.id, await pagesRead(tx, doc.id));
     await enqueueWebhook(deps.boss, tx, {
       documentId: doc.id,
       status,
@@ -350,6 +353,12 @@ export async function failDocument(
       [documentId, error, deps.clock()],
     );
     if (moved.rowCount !== 1) return false;
+    await settleCredits(
+      tx,
+      doc.org_id,
+      documentId,
+      await pagesRead(tx, documentId),
+    );
     await enqueueWebhook(deps.boss, tx, {
       documentId,
       status: "failed",
@@ -371,4 +380,13 @@ async function afterEnd(deps: PipelineDeps, doc: DocumentRow): Promise<void> {
       : doc.source.uploads.map((u) => u.storage_key);
   for (const key of keys) await deps.store.delete(key);
   await admitNext(deps, doc.api_key_id);
+}
+
+/** A document is billed for the pages it read, not those that failed. */
+async function pagesRead(tx: Queryable, documentId: string): Promise<number> {
+  const { rows } = await tx.query<{ n: number }>(
+    "SELECT count(*)::int AS n FROM pages WHERE document_id = $1 AND state = 'read'",
+    [documentId],
+  );
+  return rows[0]?.n ?? 0;
 }
