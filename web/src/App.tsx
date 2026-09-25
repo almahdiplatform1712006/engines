@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { api, authClient, type Me } from "./api.ts";
 import { useI18n } from "./i18n.tsx";
-import { matchOrg, navigate, safeDecode, usePath } from "./router.tsx";
+import { Link, matchOrg, navigate, safeDecode, usePath } from "./router.tsx";
+
 import { AcceptInvitation } from "./screens/AcceptInvitation.tsx";
 import { NewOrganisation } from "./screens/NewOrganisation.tsx";
 import { OrganisationShell } from "./screens/OrganisationShell.tsx";
 import { SignIn } from "./screens/SignIn.tsx";
+
+// The back office is only ever opened by the owner: loaded when it is.
+const Admin = lazy(() =>
+  import("./screens/Admin.tsx").then((m) => ({ default: m.Admin })),
+);
 
 export function App() {
   const { t, toggle } = useI18n();
@@ -51,7 +57,14 @@ export function App() {
     );
   else if (path === "/organisations/new")
     screen = <NewOrganisation onCreated={refresh} />;
-  else if (path.startsWith("/invitations/"))
+  else if (path.startsWith("/admin") && me.user.super_admin) {
+    const [, , tab = "organisations", id] = path.split("/");
+    screen = (
+      <Suspense fallback={<p className="muted">{t.loading}</p>}>
+        <Admin tab={tab} id={id} />
+      </Suspense>
+    );
+  } else if (path.startsWith("/invitations/"))
     screen = (
       <AcceptInvitation
         id={safeDecode(path.slice("/invitations/".length))}
@@ -83,6 +96,11 @@ export function App() {
         <strong className="brand">{t.appName}</strong>
         <div className="topbar-actions">
           {me && <OrganisationPicker me={me} current={matchOrg(path)?.orgId} />}
+          {me?.user.super_admin && (
+            <Link to="/admin/organisations" className="link">
+              {t.backOffice}
+            </Link>
+          )}
           <button
             type="button"
             className="link"

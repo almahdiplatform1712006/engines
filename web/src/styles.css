@@ -734,3 +734,11 @@ img.page-image {
   margin-block: 0.5rem;
   margin-inline: 0;
 }
+
+tr.clickable {
+  cursor: pointer;
+}
+
+tr.clickable:hover {
+  background: var(--notice);
+}

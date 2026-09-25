@@ -95,6 +95,7 @@ Run a book through the engine locally (needs `AI_MODEL` and `OPENROUTER_API_KEY`
 ```sh
 npm run seed -- "My organisation"      # prints an API key (add --explanation for the entitlement)
 npm run credits -- grant <org_id> 1000 "first credits"   # one credit = one page
+npm run admin -- owner@example.com     # after signing up on the page: the back office at /admin
 KEY=eng_…
 curl -s localhost:8080/v1/uploads -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
   -d '{"filename":"book.pdf","content_type":"application/pdf","size":'$(stat -c%s book.pdf)'}'

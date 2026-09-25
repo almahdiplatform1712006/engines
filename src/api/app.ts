@@ -40,6 +40,7 @@ import {
 } from "../exports/export.ts";
 import { chromiumPath } from "../exports/pdf.ts";
 import { errorResponse, readBody, unauthorized } from "./errors.ts";
+import { adminRoutes } from "./admin.ts";
 import { pageRoutes } from "./page.ts";
 import { allowedOrigins, readSession } from "./page-session.ts";
 import {
@@ -83,6 +84,7 @@ export function createApp(deps: AppDeps): Hono {
     origins: allowedOrigins(auth.options.baseURL, auth.options.trustedOrigins),
   };
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+  app.route("/page/admin", adminRoutes(session));
   app.route(
     "/page",
     pageRoutes({
