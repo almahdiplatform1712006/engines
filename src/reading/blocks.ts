@@ -6,7 +6,8 @@
 // than unions (ADR 0001). `toBlocks` turns that into normalised blocks, fixing or
 // flagging bad combinations instead of throwing.
 import { z } from "zod";
-import { CropBox } from "../golden/truth.ts";
+import type { CropBox } from "../contract/crop.ts";
+import { MathDirection, QuestionType } from "../contract/document.ts";
 import { parsePrintedNumber } from "../shared/text.ts";
 
 export const BLOCK_KINDS = [
@@ -20,15 +21,7 @@ export const BLOCK_KINDS = [
 export const BlockKind = z.enum(BLOCK_KINDS);
 export type BlockKind = z.infer<typeof BlockKind>;
 
-export const QuestionType = z.enum([
-  "multiple_choice",
-  "fill_blank",
-  "true_false",
-]);
-export type QuestionType = z.infer<typeof QuestionType>;
-
-export const MathDirection = z.enum(["ltr", "rtl"]);
-export type MathDirection = z.infer<typeof MathDirection>;
+export { MathDirection, QuestionType };
 
 const Option = z.object({
   key: z

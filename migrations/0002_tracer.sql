@@ -73,7 +73,7 @@ CREATE TABLE documents (
     'queued', 'rendering', 'awaiting_offset', 'processing',
     'completed', 'completed_with_errors', 'failed'
   )),
-  -- { "kind": "pdf", "upload_id": … } or { "kind": "images", "upload_ids": [ … ] }
+  -- { "kind": "pdf", "upload_id", "storage_key" } or { "kind": "images", "uploads": [{ "upload_id", "storage_key" }] }
   source jsonb NOT NULL,
   webhook_url text,
   page_count integer,

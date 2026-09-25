@@ -83,10 +83,14 @@ export async function createUpload(
   };
 }
 
-/** The organisation's upload, checked to be finished in storage. */
+/**
+ * The organisation's upload, checked to be unexpired, not used by another
+ * document (its file is deleted when that document ends) and finished in storage.
+ */
 export async function finishedUpload(
   db: Queryable,
   store: BlobStore,
+  clock: Clock,
   orgId: string,
   id: string,
 ): Promise<Upload> {
@@ -96,16 +100,30 @@ export async function finishedUpload(
     storage_key: string;
     filename: string;
     content_type: string;
-    size: number;
     expires_at: Date;
+    document_id: string | null;
   }>("SELECT * FROM uploads WHERE id = $1 AND org_id = $2", [id, orgId]);
   const row = rows[0];
   if (!row) throw new Refusal("not_found", `No upload ${id}.`);
+  if (row.document_id !== null) {
+    throw new Refusal(
+      "wrong_state",
+      `Upload ${id} was already used by document ${row.document_id}. Upload the file again to run it again.`,
+    );
+  }
+  if (row.expires_at <= clock()) {
+    throw new Refusal(
+      "gone",
+      `Upload ${id} has expired. Upload the file again.`,
+    );
+  }
   const stored = await store.size(row.storage_key);
-  if (stored === null)
+  if (stored === null) {
     throw new Refusal("upload_incomplete", `Upload ${id} hasn't finished yet.`);
-  if (stored > MAX_UPLOAD_BYTES)
+  }
+  if (stored > MAX_UPLOAD_BYTES) {
     throw new Refusal("too_large", "Files can be up to 500 MB.");
+  }
   return {
     id: row.id,
     orgId: row.org_id,
@@ -115,4 +133,25 @@ export async function finishedUpload(
     size: stored,
     expiresAt: row.expires_at,
   };
+}
+
+/**
+ * Marks uploads as used by a document, inside the caller's transaction. Refused
+ * when another document claimed one first.
+ */
+export async function claimUploads(
+  tx: Queryable,
+  documentId: string,
+  uploadIds: readonly string[],
+): Promise<void> {
+  const { rowCount } = await tx.query(
+    "UPDATE uploads SET document_id = $1 WHERE id = ANY($2) AND document_id IS NULL",
+    [documentId, [...new Set(uploadIds)]],
+  );
+  if (rowCount !== new Set(uploadIds).size) {
+    throw new Refusal(
+      "wrong_state",
+      "An upload in this request is already used by another document.",
+    );
+  }
 }

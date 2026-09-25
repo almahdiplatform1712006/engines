@@ -1,7 +1,7 @@
 // The result as stored in a revision. Same as the `/v1/` shapes, except images:
 // a stored image is a crop of a page image, kept as its storage key and box so
 // it can be re-cropped in review; the API turns it into a signed URL.
-import type { CropBox } from "../golden/truth.ts";
+import type { CropBox } from "../contract/crop.ts";
 import type {
   ExplanationChunk,
   Failure,

@@ -159,6 +159,8 @@ export function localStore(options: LocalStoreOptions): LocalStore {
       if (chunk[3] !== "*") total = Number(chunk[3]);
       if (Number(chunk[2]) - start + 1 !== body.length)
         return c.text("Content-Range does not match the body", 400);
+      if (Number(chunk[2]) >= total)
+        return c.text("Content-Range ends past the declared size", 400);
     } else {
       total = body.length;
     }

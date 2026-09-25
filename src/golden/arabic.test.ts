@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { characterErrorRate, normalizeArabic } from "./arabic.ts";
+import { normalizeArabic } from "../shared/text.ts";
+import { characterErrorRate } from "./arabic.ts";
 
 describe("normalizeArabic", () => {
   test("strips tatweel", () => {

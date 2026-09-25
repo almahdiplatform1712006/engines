@@ -1,19 +1,9 @@
 // The golden-set file formats. `golden/README.md` documents them for people;
 // these schemas are what the tools actually check.
 import { z } from "zod";
+import { CropBox } from "../contract/crop.ts";
 
-/** A box on the page image, as fractions of its width and height (0–1), so it survives any DPI. */
-export const CropBox = z
-  .object({
-    x: z.number().min(0).max(1),
-    y: z.number().min(0).max(1),
-    w: z.number().min(0).max(1),
-    h: z.number().min(0).max(1),
-  })
-  .refine((b) => b.x + b.w <= 1.000001 && b.y + b.h <= 1.000001, {
-    error: "crop box must stay inside the page",
-  });
-export type CropBox = z.infer<typeof CropBox>;
+export { CropBox };
 
 export const Stimulus = z.object({
   id: z.string().min(1),

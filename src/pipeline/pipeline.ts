@@ -12,13 +12,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PgBoss } from "pg-boss";
 import { assemble, type FailedPage } from "../assembly/assemble.ts";
-import type { OutlineNode } from "../contract/outline.ts";
 import { loadDocument, type DocumentRow } from "../documents/store.ts";
 import { IDENTITY } from "../offset/segments.ts";
 import { getOutline } from "../outline/store.ts";
 import type { PageReading } from "../reading/blocks.ts";
 import type { PageReader } from "../reading/reader.ts";
-import { normalisePhoto, pageCount, renderPage } from "../render/render.ts";
+import {
+  normalisePhoto,
+  pageCount,
+  renderPage,
+  type RenderedPage,
+} from "../render/render.ts";
+import { TruncatedOutputError } from "../reading/model.ts";
 import type { Clock } from "../shared/clock.ts";
 import type { Provider } from "../shared/config.ts";
 import type { Db, Queryable } from "../shared/db/pool.ts";
@@ -208,7 +213,7 @@ async function render(deps: PipelineDeps, documentId: string): Promise<void> {
   );
   const addPage = async (
     pdfPage: number,
-    make: () => Promise<{ png: Buffer; width: number; height: number }>,
+    make: () => Promise<RenderedPage>,
   ) => {
     if (done.has(pdfPage)) return;
     const page = await make();
@@ -265,15 +270,20 @@ async function render(deps: PipelineDeps, documentId: string): Promise<void> {
       );
     }
     if (pending.rows.length === 0) {
-      await deps.boss.send(
-        queues.finish,
-        { documentId } satisfies DocumentJob,
-        {
-          singletonKey: documentId,
-          db: inTransaction(tx),
-        },
-      );
+      await startFinish(deps.boss, tx, documentId);
     }
+  });
+}
+
+/** Enqueues the finish step in the caller's transaction; the queue keeps one per document. */
+async function startFinish(
+  boss: PgBoss,
+  tx: Queryable,
+  documentId: string,
+): Promise<void> {
+  await boss.send(queues.finish, { documentId } satisfies DocumentJob, {
+    singletonKey: documentId,
+    db: inTransaction(tx),
   });
 }
 
@@ -304,13 +314,15 @@ async function readPage(deps: PipelineDeps, job: PageJob): Promise<void> {
         { orgId: page.org_id, documentId: job.documentId },
       );
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Output that never fits won't fit on a retry either: fail the page now.
+    if (error instanceof TruncatedOutputError) {
+      await settlePage(deps, job, { state: "failed", error: message });
+      return;
+    }
     await deps.db.query(
       "UPDATE pages SET error = $3 WHERE document_id = $1 AND pdf_page = $2",
-      [
-        job.documentId,
-        job.pdfPage,
-        error instanceof Error ? error.message : String(error),
-      ],
+      [job.documentId, job.pdfPage, message],
     );
     throw error;
   }
@@ -349,14 +361,7 @@ export async function settlePage(
       [job.documentId],
     );
     if (rows[0]?.pages_pending === 0) {
-      await deps.boss.send(
-        queues.finish,
-        { documentId: job.documentId } satisfies DocumentJob,
-        {
-          singletonKey: job.documentId,
-          db: inTransaction(tx),
-        },
-      );
+      await startFinish(deps.boss, tx, job.documentId);
     }
   });
 }
@@ -387,7 +392,7 @@ async function finish(deps: PipelineDeps, documentId: string): Promise<void> {
 
   const result = assemble({
     type: doc.type,
-    tree: outline.nodes satisfies OutlineNode[],
+    tree: outline.nodes,
     segments: doc.offset_segments ?? IDENTITY,
     pages: readings,
     failedPages,

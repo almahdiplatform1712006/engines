@@ -23,6 +23,16 @@ export const TERMINAL_STATUSES: readonly DocumentStatus[] = [
   "failed",
 ];
 
+export const QuestionType = z.enum([
+  "multiple_choice",
+  "fill_blank",
+  "true_false",
+]);
+export type QuestionType = z.infer<typeof QuestionType>;
+
+export const MathDirection = z.enum(["ltr", "rtl"]);
+export type MathDirection = z.infer<typeof MathDirection>;
+
 export const Locator = z.object({
   pdf_page: z.int(),
   printed_page: z.int().nullable(),
@@ -39,7 +49,7 @@ export const ReviewReason = z
 
 export const Question = z.object({
   id: z.string(),
-  type: z.enum(["multiple_choice", "fill_blank", "true_false"]),
+  type: QuestionType,
   number: z.string().nullable(),
   text: z.string(),
   options: z.array(z.object({ key: z.string(), text: z.string() })),
@@ -52,7 +62,7 @@ export const Question = z.object({
   stimulus_id: z.string().nullable(),
   locator: Locator,
   idea_tag: z.string().nullable(),
-  math_direction: z.enum(["ltr", "rtl"]).nullable(),
+  math_direction: MathDirection.nullable(),
   image: Image.nullable(),
   review_required: z.boolean(),
   review_reason: ReviewReason.nullable(),
@@ -77,7 +87,7 @@ export const ExplanationChunk = z.object({
   external_ref: z.string().nullable(),
   heading: z.string(),
   markdown: z.string(),
-  math_direction: z.enum(["ltr", "rtl"]).nullable(),
+  math_direction: MathDirection.nullable(),
   figures: z.array(Image),
   pages: z.object({ pdf: z.array(z.int()), printed: z.array(z.int()) }),
   review_required: z.boolean(),

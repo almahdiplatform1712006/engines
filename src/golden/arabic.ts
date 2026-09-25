@@ -1,8 +1,6 @@
 import { normalizeArabic } from "../shared/text.ts";
 import type { Ratio } from "./ratio.ts";
 
-export { normalizeArabic };
-
 /**
  * Character error rate of `predicted` against `truth`, after normalising both:
  * edit distance over the truth's length, counted in Unicode code points.

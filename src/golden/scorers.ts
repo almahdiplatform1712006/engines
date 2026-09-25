@@ -1,7 +1,8 @@
 // Scorers compare what a page reader returned for one page with the page's truth.
 // Each returns a Ratio so that pages add up into book and run totals.
 import katex from "katex";
-import { characterErrorRate, normalizeArabic, similarity } from "./arabic.ts";
+import { normalizeArabic } from "../shared/text.ts";
+import { characterErrorRate, similarity } from "./arabic.ts";
 import type { Ratio } from "./ratio.ts";
 import type { CropBox, PageContent, Question, Usage } from "./truth.ts";
 
