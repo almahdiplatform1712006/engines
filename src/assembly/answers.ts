@@ -1,7 +1,11 @@
 // Answers (spec #1 §4 step 7, decision Q17; E-11). Pure. The book's own answer
 // key comes first, then a visible mark on the page; only when neither exists
 // does the model solve the question (done outside, flagged).
+import type { Locator } from "../contract/document.ts";
+import type { SolveRequest, SolvedAnswer } from "../reading/reader.ts";
 import { matchKey, toAsciiDigits } from "../shared/text.ts";
+import { flag } from "./checks.ts";
+import type { StoredFailure, StoredQuestion } from "./result.ts";
 
 export interface AnswerQuestion {
   id: string;
@@ -118,12 +122,21 @@ export function answerFor(
   return null;
 }
 
+export interface KeyMatch {
+  /** Question id → the book's answer. */
+  answers: Map<string, Answer>;
+  /** Question id → a book answer that names none of the question's options. */
+  mismatched: Map<string, string>;
+  /** Entries that matched no question, or several. */
+  unmatched: AnswerEntry[];
+}
+
 /**
  * Matches answer-key entries to questions by (lesson, question number).
  * `lessonOf` turns an entry's section into a node id (null when it names
  * none). An entry for a lesson matches the one question with its number in
  * that lesson; an entry without a lesson matches only a number that appears
- * once in the whole book. Anything ambiguous stays unmatched.
+ * once in the whole book. Anything ambiguous stays unmatched, and is reported.
  */
 export function matchAnswerKey(
   entries: readonly AnswerEntry[],
@@ -131,21 +144,166 @@ export function matchAnswerKey(
   lessonOf: (section: string | null) => string | null,
   inLesson: (questionNode: string, lesson: string) => boolean = (a, b) =>
     a === b,
-): Map<string, Answer> {
-  const answers = new Map<string, Answer>();
+): KeyMatch {
+  const match: KeyMatch = {
+    answers: new Map(),
+    mismatched: new Map(),
+    unmatched: [],
+  };
   for (const entry of entries) {
     const number = normaliseNumber(entry.number);
-    if (number === null) continue;
     const lesson = lessonOf(entry.section) ?? entry.node_id ?? null;
-    const candidates = questions.filter(
-      (q) =>
-        normaliseNumber(q.number) === number &&
-        (lesson === null || inLesson(q.node_id, lesson)),
-    );
+    const candidates =
+      number === null
+        ? []
+        : questions.filter(
+            (q) =>
+              normaliseNumber(q.number) === number &&
+              (lesson === null || inLesson(q.node_id, lesson)),
+          );
     const [question] = candidates;
-    if (candidates.length !== 1 || !question) continue;
+    if (candidates.length !== 1 || !question) {
+      match.unmatched.push(entry);
+      continue;
+    }
     const answer = answerFor(entry.answer, question);
-    if (answer) answers.set(question.id, answer);
+    if (answer) match.answers.set(question.id, answer);
+    else match.mismatched.set(question.id, entry.answer);
   }
-  return answers;
+  return match;
+}
+
+/** Where a question's answer comes from, resolved for every question. */
+export interface AnswerSources {
+  /** The answer-key blocks, in reading order, with the node each was placed in. */
+  keyBlocks: readonly {
+    entries: readonly {
+      section: string | null;
+      number: string;
+      answer: string;
+    }[];
+    /** The last heading before the block, standing in for a missing section. */
+    heading: string | null;
+    /** The content node the block sits in (answers at a lesson's end), else null. */
+    node_id: string | null;
+    locator: Locator;
+  }[];
+  lessonOf: (section: string | null) => string | null;
+  inLesson: (questionNode: string, lesson: string) => boolean;
+  /** Question id → option labels (or written answers) marked by hand. */
+  marks: ReadonlyMap<string, readonly string[]>;
+  /** Question id → what solving needs beyond the question: its passage and figure. */
+  context: ReadonlyMap<
+    string,
+    { stimulus: string | null; figure: SolveRequest["figure"] }
+  >;
+  /** The model's answers, once the solve stage ran. */
+  solved: ReadonlyMap<string, SolvedAnswer> | undefined;
+}
+
+/**
+ * Step 7: fills every question's answer — the book's key, then a mark on the
+ * page, then the model's — and returns the questions left for the model, with
+ * failures for answer-key entries that answered nothing. Model answers are
+ * always flagged; a book answer that names no option is flagged, not fixed.
+ */
+export function resolveAnswers(
+  questions: StoredQuestion[],
+  sources: AnswerSources,
+): { unanswered: SolveRequest[]; failures: StoredFailure[] } {
+  const entries = sources.keyBlocks.flatMap((block) =>
+    block.entries.map((entry) => ({
+      ...entry,
+      section: entry.section ?? block.heading,
+      node_id: block.node_id,
+      locator: block.locator,
+    })),
+  );
+  const key = matchAnswerKey(
+    entries,
+    questions,
+    sources.lessonOf,
+    sources.inLesson,
+  );
+
+  const failures: StoredFailure[] = [];
+  const unmatchedByPage = new Map<
+    number,
+    { locator: Locator; numbers: string[] }
+  >();
+  for (const entry of key.unmatched as typeof entries) {
+    const page = unmatchedByPage.get(entry.locator.pdf_page) ?? {
+      locator: entry.locator,
+      numbers: [],
+    };
+    page.numbers.push(entry.number);
+    unmatchedByPage.set(entry.locator.pdf_page, page);
+  }
+  for (const { locator, numbers } of unmatchedByPage.values()) {
+    failures.push({
+      reason: "unmatched_answer_key",
+      locator,
+      detail: `answer-key entries that matched no single question: ${numbers.join(", ")}`,
+    });
+  }
+
+  const unanswered: SolveRequest[] = [];
+  for (const question of questions) {
+    const set = (answer: Answer, source: StoredQuestion["answer_source"]) => {
+      question.correct = answer.correct;
+      question.accepted_answers = answer.accepted_answers;
+      question.answer_source = source;
+    };
+    if (key.mismatched.has(question.id)) flag(question, "book_answer_mismatch");
+    const fromBook = key.answers.get(question.id);
+    if (fromBook) {
+      set(fromBook, "book");
+      continue;
+    }
+    const fromMarks = markedAnswer(
+      question,
+      sources.marks.get(question.id) ?? [],
+    );
+    if (fromMarks) {
+      set(fromMarks, "marked");
+      continue;
+    }
+    if (sources.solved) {
+      const fromModel = sources.solved.get(question.id);
+      if (fromModel) {
+        set(fromModel, "model");
+        flag(question, "model_answer");
+      } else {
+        flag(question, "no_answer");
+      }
+      continue;
+    }
+    const context = sources.context.get(question.id);
+    unanswered.push({
+      question_id: question.id,
+      number: question.number,
+      type: question.type,
+      text: question.text,
+      options: question.options,
+      stimulus: context?.stimulus ?? null,
+      figure: context?.figure ?? null,
+    });
+  }
+  return { unanswered, failures };
+}
+
+/** A hand mark on the page (a circle, tick or fill), when it names the question's options. */
+function markedAnswer(
+  question: AnswerQuestion,
+  marks: readonly string[],
+): Answer | null {
+  if (marks.length === 0) return null;
+  const answers = marks.map((mark) => answerFor(mark, question));
+  if (answers.some((a) => a === null)) return null;
+  return {
+    correct: [...new Set(answers.flatMap((a) => a?.correct ?? []))],
+    accepted_answers: [
+      ...new Set(answers.flatMap((a) => a?.accepted_answers ?? [])),
+    ],
+  };
 }

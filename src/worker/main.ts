@@ -35,12 +35,14 @@ const reader = (provider: Provider): PageReader => {
   return existing;
 };
 
+const workerConfig = readWorkerConfig(process.env);
 const worker = await startWorker({
   databaseUrl,
+  chunking: workerConfig.chunking,
   store: storeFromConfig(readStorageConfig(process.env)),
   clock: systemClock,
   reader,
-  options: readWorkerConfig(process.env),
+  options: { pageConcurrency: workerConfig.pageConcurrency },
 });
 console.log("worker started");
 

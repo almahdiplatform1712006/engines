@@ -126,6 +126,17 @@ describe("checkPages (step 3)", () => {
     );
   });
 
+  test("numbered front matter outside the segments says nothing about the page after it", () => {
+    assert.deepEqual(
+      checkPages(segments, [
+        { pdf_page: 4, printed_number: 3 },
+        { pdf_page: 5, printed_number: null },
+        { pdf_page: 6, printed_number: 2 },
+      ]),
+      [],
+    );
+  });
+
   test("pages outside every segment aren't checked", () => {
     assert.deepEqual(
       checkPages(segments, [{ pdf_page: 2, printed_number: null }]),

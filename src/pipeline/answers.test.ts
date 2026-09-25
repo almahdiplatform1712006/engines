@@ -34,7 +34,12 @@ const reader = scriptedReader({
     ]),
     3: page("3", [
       heading("إجابات الدرس الأول"),
-      key([{ number: "1", answer: "ب" }]),
+      // Question 3's key names no option; there is no question 9.
+      key([
+        { number: "1", answer: "ب" },
+        { number: "3", answer: "هـ" },
+        { number: "9", answer: "أ" },
+      ]),
       heading("إجابات الدرس الثاني"),
       key([{ number: "(1)", answer: "a" }]),
     ]),
@@ -79,9 +84,19 @@ test("book, then marked, then model — and the model only where it's needed", a
     [
       ["l1", "١", "book", ["ب"], null],
       ["l1", "2", "marked", ["ج"], null],
-      ["l1", "3", "model", ["د"], "model_answer"],
+      ["l1", "3", "model", ["د"], "book_answer_mismatch"],
       ["l2", "1", "book", ["أ"], null],
       ["l2", "2", null, [], "no_answer"],
+    ],
+  );
+  assert.deepEqual(
+    doc.failures.map((f) => [f.reason, f.locator.pdf_page, f.detail]),
+    [
+      [
+        "unmatched_answer_key",
+        3,
+        "answer-key entries that matched no single question: 9",
+      ],
     ],
   );
   // No model call for a question the book or a mark already answered.

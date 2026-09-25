@@ -85,8 +85,16 @@ describe("linkStimuli", () => {
     );
   });
 
-  test("no hint and no range: no link", () => {
-    assert.deepEqual(links([q("q1", { number: "3" })], [stim("s1")]), {});
+  test("no instruction under a stimulus on its page: linked, but uncertain", () => {
+    const passage = stim("s1");
+    assert.deepEqual(links([q("q1", { number: "3" })], [passage]), {
+      q1: ["s1", true],
+    });
+  });
+
+  test("no instruction, and the stimulus above covers other numbers: no link", () => {
+    const passage = stim("s1", { covers: { from: "1", to: "2" } });
+    assert.deepEqual(links([q("q3", { number: "3" })], [passage]), {});
   });
 
   test("stimuli in another node or pages away aren't candidates", () => {

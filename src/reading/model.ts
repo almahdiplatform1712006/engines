@@ -182,18 +182,27 @@ export function createModelReader(options: ModelReaderOptions): PageReader {
           },
         ],
       );
-      const joined =
-        pages.find((p) => p.page === first.pdf_page)?.blocks[0] ??
-        pages.flatMap((p) => p.blocks)[0];
+      // The joined block is the first block of the first page's entry. A reply
+      // that puts it anywhere else isn't guessed at.
+      const joined = pages.find((p) => p.page === first.pdf_page)?.blocks[0];
       if (!joined)
         throw new NoJoinedBlockError(
           `pair ${first.id} + ${second.id}: no joined block returned`,
         );
       return toBlock(first.pdf_page, first.order, joined);
     },
-    solve(question, context) {
+    solve(question, context, figure) {
       return call(options.main, "solve", null, context, Solved, SOLVE, [
         { type: "text", text: solvePrompt(question) },
+        ...(figure
+          ? [
+              {
+                type: "image" as const,
+                image: figure.bytes,
+                mediaType: figure.mediaType,
+              },
+            ]
+          : []),
       ]);
     },
     async readPage(image, context) {

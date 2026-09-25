@@ -3,8 +3,13 @@ import type {
   Document,
   DocumentStatus,
   DocumentType,
+  Failure,
 } from "../contract/document.ts";
-import type { StoredImage, ResultBody } from "../assembly/result.ts";
+import type {
+  ResultBody,
+  StoredFailure,
+  StoredImage,
+} from "../assembly/result.ts";
 import type { OffsetSegment } from "../offset/segments.ts";
 import { hasEntitlement } from "../accounts/entitlements.ts";
 import type { Queryable } from "../shared/db/pool.ts";
@@ -126,7 +131,7 @@ export async function documentView(
       })),
     ),
     skipped: body?.skipped ?? { neither: 0, off_type: 0 },
-    failures: body?.failures ?? [],
+    failures: await withPageImages(db, store, row.id, body?.failures ?? []),
   };
   // Explanation is only returned while the organisation holds the entitlement.
   if (
@@ -143,4 +148,30 @@ export async function documentView(
     );
   }
   return document;
+}
+
+/** Each failure with a signed URL to its page's image, where the page was rendered. */
+async function withPageImages(
+  db: Queryable,
+  store: BlobStore,
+  documentId: string,
+  failures: readonly StoredFailure[],
+): Promise<Failure[]> {
+  if (failures.length === 0) return [];
+  const { rows } = await db.query<{ pdf_page: number; image_key: string }>(
+    "SELECT pdf_page, image_key FROM pages WHERE document_id = $1 AND pdf_page = ANY($2)",
+    [documentId, [...new Set(failures.map((f) => f.locator.pdf_page))]],
+  );
+  const keys = new Map(rows.map((r) => [r.pdf_page, r.image_key]));
+  return Promise.all(
+    failures.map(async (failure) => {
+      const key = keys.get(failure.locator.pdf_page);
+      return {
+        ...failure,
+        page_image: key
+          ? { url: await store.signedUrl(key, IMAGE_URL_TTL_SECONDS) }
+          : null,
+      };
+    }),
+  );
 }

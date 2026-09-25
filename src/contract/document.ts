@@ -105,6 +105,8 @@ export const Failure = z.object({
   reason: FailureReason,
   locator: Locator,
   detail: z.string().nullable(),
+  /** The page the failure is on, so it can be fixed by hand in review. */
+  page_image: Image.nullable(),
 });
 export type Failure = z.infer<typeof Failure>;
 

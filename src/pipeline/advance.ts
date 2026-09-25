@@ -14,7 +14,9 @@ import {
 } from "../assembly/assemble.ts";
 import { cutCrops } from "./crops.ts";
 import type { Join } from "../assembly/continuations.ts";
-import { findPairs } from "../assembly/continuations.ts";
+import { findPairs, type Pair } from "../assembly/continuations.ts";
+import { cropImage } from "../render/crop.ts";
+import { loadPageImage } from "./pages.ts";
 import { loadDocument, type DocumentRow } from "../documents/store.ts";
 import { IDENTITY } from "../offset/segments.ts";
 import { getOutline } from "../outline/store.ts";
@@ -140,13 +142,28 @@ export async function runTask(deps: PipelineDeps, job: TaskJob): Promise<void> {
   let output: unknown;
   try {
     if (job.stage === "solve") {
-      output = await reader.solve(task.input as SolveRequest, context);
+      const question = task.input as SolveRequest;
+      // A question with a figure is solved with the figure's crop in view.
+      const figure = question.figure
+        ? {
+            pdfPage: question.figure.pdf_page,
+            bytes: await cropImage(
+              Buffer.from(
+                (await loadPageImage(deps, doc.id, question.figure.pdf_page))
+                  .bytes,
+              ),
+              question.figure.box,
+            ),
+            mediaType: "image/png" as const,
+          }
+        : undefined;
+      output = await reader.solve(question, context, figure);
     } else {
-      const { first, second } = task.input as { first: Block; second: Block };
+      const { first, second } = task.input as Pair;
       output = await reader.readPair(
         [
-          await pageImage(deps, doc.id, first.pdf_page),
-          await pageImage(deps, doc.id, second.pdf_page),
+          await loadPageImage(deps, doc.id, first.pdf_page),
+          await loadPageImage(deps, doc.id, second.pdf_page),
         ],
         [first, second],
         context,
@@ -216,25 +233,6 @@ async function settleTask(
   });
 }
 
-async function pageImage(
-  deps: PipelineDeps,
-  documentId: string,
-  pdfPage: number,
-) {
-  const { rows } = await deps.db.query<{ image_key: string }>(
-    "SELECT image_key FROM pages WHERE document_id = $1 AND pdf_page = $2",
-    [documentId, pdfPage],
-  );
-  const key = rows[0]?.image_key;
-  if (!key)
-    throw new Error(`page ${String(pdfPage)} of ${documentId} has no image`);
-  return {
-    pdfPage,
-    bytes: await deps.store.get(key),
-    mediaType: "image/png" as const,
-  };
-}
-
 async function storedInputs(
   deps: PipelineDeps,
   doc: DocumentRow,
@@ -271,7 +269,7 @@ async function storedInputs(
       .filter((p) => p.state !== "read")
       .map((p) => ({ pdf_page: p.pdf_page, detail: p.error ?? "not read" })),
     joins: done("pair").map((t) => {
-      const { first, second } = t.input as { first: Block; second: Block };
+      const { first, second } = t.input as Pair;
       return {
         replaces: [first.id, second.id] as const,
         block: t.output as Block,
@@ -297,6 +295,7 @@ async function assemblyInput(
     pages: inputs.readings,
     failedPages: inputs.failedPages,
     joins: inputs.joins,
+    ...(deps.chunking ? { chunking: deps.chunking } : {}),
   };
 }
 

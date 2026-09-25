@@ -125,8 +125,20 @@ export function readStorageConfig(env: Env): StorageConfig {
 
 const workerEnv = z.object({
   PAGE_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(4),
+  CHUNK_MAX_TOKENS: z.coerce.number().int().min(50).default(800),
+  CHUNK_MIN_TOKENS: z.coerce.number().int().min(0).default(60),
 });
 
-export function readWorkerConfig(env: Env): { pageConcurrency: number } {
-  return { pageConcurrency: parse(workerEnv, env).PAGE_CONCURRENCY };
+export interface WorkerConfig {
+  pageConcurrency: number;
+  /** Explanation chunk sizes, in estimated tokens (E-12). */
+  chunking: { maxTokens: number; minTokens: number };
+}
+
+export function readWorkerConfig(env: Env): WorkerConfig {
+  const e = parse(workerEnv, env);
+  return {
+    pageConcurrency: e.PAGE_CONCURRENCY,
+    chunking: { maxTokens: e.CHUNK_MAX_TOKENS, minTokens: e.CHUNK_MIN_TOKENS },
+  };
 }

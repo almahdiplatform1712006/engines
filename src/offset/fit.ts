@@ -78,10 +78,7 @@ export function fitSegments(pairs: readonly NumberPair[]): Fit {
   }
 
   const segments: OffsetSegment[] = kept.map((run, i) => ({
-    printed_from:
-      i === 0
-        ? Math.max(1, 1 - run.shift, Math.min(run.first.printed, 1))
-        : run.first.printed,
+    printed_from: i === 0 ? Math.max(1, 1 - run.shift) : run.first.printed,
     pdf_from: 0,
     confirmed: false,
   }));
@@ -122,9 +119,16 @@ export function checkPages(
   pages: readonly { pdf_page: number; printed_number: number | null }[],
 ): Break[] {
   const sorted = [...pages].sort((a, b) => a.pdf_page - b.pdf_page);
+  // A numbered neighbour only speaks for the offset inside a segment: front
+  // matter with its own numbering says nothing about the page after it.
   const agrees = (page: { pdf_page: number; printed_number: number | null }) =>
-    page.printed_number !== null &&
     pdfToPrinted(segments, page.pdf_page) === page.printed_number;
+  const inSegment = (page: {
+    pdf_page: number;
+    printed_number: number | null;
+  }) =>
+    page.printed_number !== null &&
+    pdfToPrinted(segments, page.pdf_page) !== null;
 
   const breaks: Break[] = [];
   sorted.forEach((page, i) => {
@@ -139,11 +143,8 @@ export function checkPages(
         });
       return;
     }
-    const before = sorted
-      .slice(0, i)
-      .reverse()
-      .find((p) => p.printed_number !== null);
-    const after = sorted.slice(i + 1).find((p) => p.printed_number !== null);
+    const before = sorted.slice(0, i).reverse().find(inSegment);
+    const after = sorted.slice(i + 1).find(inSegment);
     // No numbered neighbour at all (a book without page numbers) contradicts nothing.
     if ((before && !agrees(before)) || (after && !agrees(after))) {
       breaks.push({ pdf_page: page.pdf_page, expected, read: null });

@@ -44,6 +44,7 @@ all pages settled   ─► pairs → solve stages (E-09, E-11), each fanning out
 ```
 
 - **Settling.** A task records its outcome with a guarded update (`… WHERE state = 'pending'`) and, in the same transaction, decrements `documents.pages_pending`. The transaction that reaches zero enqueues the next stage through pg-boss's `db` option, so the send commits with it. A redelivered task finds its row settled and does nothing. The next-stage queue uses the `exclusive` policy keyed by document id.
+- **Advancing.** The advance queue uses pg-boss's `stately` policy: one advance per document runs at a time and one more may wait behind it, so a task that settles while an advance is still active queues the next one instead of losing it. The sweep (E-13) re-advances any document whose tasks are all settled.
 - **Dead letters.** A task that throws on its last attempt, crashes or expires lands in its queue's dead-letter queue. That handler settles it as failed (a page becomes `part_failed`), so a document never waits on a lost task.
 - **Idempotent finish.** Revision 1 is inserted with `ON CONFLICT DO NOTHING` and the status moves only from `processing`. Blobs (the book file) are deleted after commit; the expiry sweep is the backstop.
 - **Model results are stored** (page readings in `pages.reading`, pair and solve results beside them), so a retried stage never pays twice.
@@ -59,7 +60,7 @@ The page reader asks for a flat block list (every block has every field, most nu
 
 Every block has a stable id, `p<pdf page>#<order>`, and item ids derive from it (`q_93_2`), so ids stay the same across revisions.
 
-The pair re-read (E-09) passes the two flagged halves as anchors by id and gets back only `{ joined: [{ replaces: [ids], block }] }`. Single-page readings stay authoritative for everything else.
+The pair re-read (E-09) sends both page images and describes the two flagged halves (their kind and opening text) as anchors. It answers in a `{ pages: [{ page, blocks }] }` wrapper, so the model can't reply with two JSON objects, and the joined block must be the first block of the first page's entry; a reply without one fails the pair (the halves stay as read, flagged) rather than being guessed at. Single-page readings stay authoritative for everything else.
 
 ### Offset segments
 

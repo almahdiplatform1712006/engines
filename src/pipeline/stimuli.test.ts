@@ -39,7 +39,12 @@ const reader = scriptedReader({
         stimulus_label: "Figure 1",
         needs_figure: true,
       },
+      // No instruction, but under the diagram on its page: linked, uncertain.
       { ...mcq("7", "Label the diagram", ["a", "b"]), needs_figure: true },
+    ]),
+    // A question that needs a figure nothing on its page provides.
+    3: page("3", [
+      { ...mcq("8", "Which graph is right?", ["a", "b"]), needs_figure: true },
     ]),
   },
 });
@@ -52,8 +57,8 @@ after(() => h.close());
 
 test("one stimulus per passage or diagram, linked from its questions", async () => {
   const doc = await h.runBook({
-    pdf: makePdf(["1", "2"]),
-    nodes: [{ id: "l1", name: "l1", printed_pages: { from: 1, to: 2 } }],
+    pdf: makePdf(["1", "2", "3"]),
+    nodes: [{ id: "l1", name: "l1", printed_pages: { from: 1, to: 3 } }],
   });
 
   assert.deepEqual(
@@ -72,13 +77,17 @@ test("one stimulus per passage or diagram, linked from its questions", async () 
       ["4", null, "model_answer"],
       ["5", "s_2_0", "model_answer"],
       ["6", "s_2_0", "model_answer"],
-      ["7", null, "image_unreadable"],
+      ["7", "s_2_0", "grouping_uncertain"],
+      ["8", null, "image_unreadable"],
     ],
   );
   assert.deepEqual(
     doc.failures.map((f) => [f.reason, f.locator.pdf_page]),
-    [["image_unreadable", 2]],
+    [["image_unreadable", 3]],
   );
+
+  // The failure links the page, to crop the figure by hand in review.
+  assert.ok(doc.failures[0]?.page_image?.url);
 
   // The diagram's crop is served from its signed URL.
   const url = doc.stimuli[1]?.image?.url;

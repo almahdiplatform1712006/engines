@@ -9,7 +9,9 @@
 // 3. A question with an instruction ("read the passage then answer") links to
 //    the nearest stimulus above it, on its page or the one before, in its node.
 //    When that page holds more than one candidate, the link is uncertain.
-// A question without any of these has no stimulus.
+// 4. A question with no instruction under a stimulus on its page is linked to
+//    it, uncertain, unless the stimulus names the questions it covers.
+// Otherwise the question has no stimulus.
 import { matchKey, toAsciiDigits } from "../shared/text.ts";
 
 export interface LinkStimulus {
@@ -83,7 +85,15 @@ export function linkStimuli(
     }
 
     const hint = question.stimulus_label;
-    if (hint === null) continue;
+    if (hint === null) {
+      // No instruction at all: a stimulus above it on its page is still the
+      // likely one, unless that stimulus names the questions it covers.
+      const nearest = before[0];
+      if (nearest?.pdf_page === question.pdf_page && nearest.covers === null) {
+        links.set(question.id, { stimulus_id: nearest.id, uncertain: true });
+      }
+      continue;
+    }
 
     // 2. A label the question names.
     const named = stimuli.filter(

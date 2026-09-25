@@ -1,6 +1,7 @@
 // The seam between Engines and the model (ADR 0001). Everything the pipeline
 // asks a model goes through a PageReader. Two adapters: `createModelReader`
 // (Vercel AI SDK) and `scriptedReader` (tests and local runs without a key).
+import type { CropBox } from "../contract/crop.ts";
 import type { Block, PageReading } from "./blocks.ts";
 
 export interface PageImage {
@@ -32,8 +33,15 @@ export interface PageReader {
     halves: readonly [Block, Block],
     context: CallContext,
   ): Promise<Block>;
-  /** Step 7: answers a question that has no book or marked answer (always flagged). */
-  solve(question: SolveRequest, context: CallContext): Promise<SolvedAnswer>;
+  /**
+   * Step 7: answers a question that has no book or marked answer (always
+   * flagged). `figure` is the crop of its diagram, when it has one.
+   */
+  solve(
+    question: SolveRequest,
+    context: CallContext,
+    figure?: PageImage,
+  ): Promise<SolvedAnswer>;
 }
 
 /** A question for the model to solve, with its shared passage when it has one. */
@@ -43,7 +51,10 @@ export interface SolveRequest {
   type: "multiple_choice" | "fill_blank" | "true_false";
   text: string;
   options: { key: string; text: string }[];
+  /** The text of the question's passage, when it has one. */
   stimulus: string | null;
+  /** Where the question's figure is on its page, when it has one; sent as an image. */
+  figure: { pdf_page: number; box: CropBox } | null;
 }
 
 export interface SolvedAnswer {

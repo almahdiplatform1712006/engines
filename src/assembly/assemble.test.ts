@@ -111,7 +111,8 @@ describe("placement (E-05)", () => {
     const questions = run(pages, { type: "questions" });
     assert.equal(questions.questions.length, 1);
     assert.equal(questions.stimuli.length, 1);
-    assert.deepEqual(questions.skipped, { neither: 2, off_type: 1 });
+    // A questions document counts the heading and the explanation as off_type.
+    assert.deepEqual(questions.skipped, { neither: 2, off_type: 2 });
     assert.deepEqual(
       questions.failures.map((f) => f.reason),
       ["unmapped_page"],
@@ -156,6 +157,63 @@ describe("placement (E-05)", () => {
     );
     assert.equal(result.questions.length, 0);
     assert.equal(result.skipped.off_type, 1);
+  });
+
+  test("explanation: a section holding only a diagram keeps it as a figure", () => {
+    const result = run(
+      {
+        1: page("1", [
+          modelBlock({ kind: "heading", text: "الشكل" }),
+          modelBlock({
+            kind: "passage",
+            stimulus_kind: "diagram",
+            text: "دائرة",
+            box_2d: [0, 0, 500, 500],
+          }),
+        ]),
+      },
+      { type: "explanation" },
+    );
+    assert.deepEqual(
+      result.explanation.map((c) => [c.heading, c.figures.length]),
+      [["الشكل", 1]],
+    );
+  });
+
+  test("both: a diagram a question uses is a stimulus; another is a figure of its section", () => {
+    const result = run(
+      {
+        1: page("1", [
+          modelBlock({ kind: "explanation", text: "شرح" }),
+          modelBlock({
+            kind: "passage",
+            stimulus_kind: "diagram",
+            label: "شكل 1",
+            text: "",
+            box_2d: [0, 0, 300, 300],
+          }),
+          modelBlock({ kind: "heading", text: "تمارين" }),
+          modelBlock({
+            kind: "passage",
+            stimulus_kind: "diagram",
+            label: "شكل 2",
+            text: "",
+            box_2d: [400, 0, 700, 300],
+          }),
+          { ...mcq("1", "سؤال"), stimulus_label: "شكل 2" },
+        ]),
+      },
+      { type: "both" },
+    );
+    assert.deepEqual(
+      result.stimuli.map((s) => s.id),
+      ["s_1_3"],
+    );
+    assert.equal(result.questions[0]?.stimulus_id, "s_1_3");
+    assert.deepEqual(
+      result.explanation.map((c) => c.figures.length),
+      [1],
+    );
   });
 
   test("both keeps questions and explanation apart", () => {

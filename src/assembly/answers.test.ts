@@ -116,12 +116,29 @@ describe("matchAnswerKey", () => {
       { section: "الدرس الثاني", number: "(1)", answer: "أ" },
     ];
     assert.deepEqual(
-      Object.fromEntries(matchAnswerKey(entries, questions, lessonOf)),
+      Object.fromEntries(matchAnswerKey(entries, questions, lessonOf).answers),
       {
         q1: { correct: ["ب"], accepted_answers: [] },
         q2: { correct: ["د"], accepted_answers: [] },
         q1b: { correct: ["أ"], accepted_answers: [] },
       },
+    );
+  });
+
+  test("an answer naming no option, and an entry matching no question, are reported", () => {
+    const match = matchAnswerKey(
+      [
+        { section: "الدرس الأول", number: "1", answer: "هـ" },
+        { section: "الدرس الأول", number: "9", answer: "أ" },
+      ],
+      questions,
+      lessonOf,
+    );
+    assert.deepEqual([...match.answers], []);
+    assert.deepEqual([...match.mismatched], [["q1", "هـ"]]);
+    assert.deepEqual(
+      match.unmatched.map((e) => e.number),
+      ["9"],
     );
   });
 
@@ -131,7 +148,7 @@ describe("matchAnswerKey", () => {
       { section: null, number: "2", answer: "ج" },
     ];
     assert.deepEqual(
-      Object.fromEntries(matchAnswerKey(entries, questions, lessonOf)),
+      Object.fromEntries(matchAnswerKey(entries, questions, lessonOf).answers),
       {
         q2: { correct: ["ج"], accepted_answers: [] },
       },

@@ -37,6 +37,7 @@ export async function startWorker(deps: WorkerDeps): Promise<Worker> {
     store: deps.store,
     clock: deps.clock,
     reader: deps.reader,
+    ...(deps.chunking ? { chunking: deps.chunking } : {}),
   };
   await registerPipeline(pipeline, { ...DEFAULT_OPTIONS, ...deps.options });
 

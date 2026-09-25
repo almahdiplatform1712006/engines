@@ -3,7 +3,8 @@
 // `image_unreadable` failure; its item is flagged, never dropped.
 import type { ResultBody, StoredImage } from "../assembly/result.ts";
 import { cropImage } from "../render/crop.ts";
-import type { PipelineDeps } from "./deps.ts";
+import { messageOf, type PipelineDeps } from "./deps.ts";
+import { loadPageImage } from "./pages.ts";
 
 export async function cutCrops(
   deps: Pick<PipelineDeps, "db" | "store">,
@@ -15,16 +16,9 @@ export async function cutCrops(
   const pageImage = (pdfPage: number) => {
     let image = pages.get(pdfPage);
     if (!image) {
-      image = deps.db
-        .query<{ image_key: string }>(
-          "SELECT image_key FROM pages WHERE document_id = $1 AND pdf_page = $2",
-          [documentId, pdfPage],
-        )
-        .then(({ rows }) => {
-          const key = rows[0]?.image_key;
-          if (!key) throw new Error(`no image for page ${String(pdfPage)}`);
-          return deps.store.get(key);
-        });
+      image = loadPageImage(deps, documentId, pdfPage).then((p) =>
+        Buffer.from(p.bytes),
+      );
       pages.set(pdfPage, image);
     }
     return image;
@@ -42,7 +36,7 @@ export async function cutCrops(
       result.failures.push({
         reason: "image_unreadable",
         locator: { pdf_page: image.pdf_page, printed_page: null },
-        detail: `${name}: ${error instanceof Error ? error.message : String(error)}`,
+        detail: `${name}: ${messageOf(error)}`,
       });
       return false;
     }

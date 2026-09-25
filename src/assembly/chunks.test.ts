@@ -53,6 +53,20 @@ describe("splitMarkdown", () => {
   });
 });
 
+describe("chunkSections: tiny first sections", () => {
+  test("a tiny first section of a node merges forward into the next", () => {
+    const chunks = chunkSections(
+      [section("مقدمة", words(3)), section("أ", words(20))],
+      options,
+    );
+    assert.deepEqual(
+      chunks.map((c) => c.heading),
+      ["مقدمة"],
+    );
+    assert.ok(chunks[0]?.markdown.includes("### مقدمة"));
+  });
+});
+
 describe("chunkSections", () => {
   test("one chunk per section, with the heading breadcrumb", () => {
     const [chunk] = chunkSections(

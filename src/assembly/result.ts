@@ -26,10 +26,12 @@ export type StoredChunk = Omit<ExplanationChunk, "figures"> & {
   figures: StoredImage[];
 };
 
+export type StoredFailure = Omit<Failure, "page_image">;
+
 export interface ResultBody {
   stimuli: StoredStimulus[];
   questions: StoredQuestion[];
   explanation: StoredChunk[];
   skipped: { neither: number; off_type: number };
-  failures: Failure[];
+  failures: StoredFailure[];
 }

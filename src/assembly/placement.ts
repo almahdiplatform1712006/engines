@@ -78,7 +78,9 @@ export function place(
     let current = first;
     content.forEach((block, i) => {
       const start = missing ? undefined : starts.get(i);
-      if (start) current = start;
+      // The split only moves forward: a heading for a node that starts before
+      // the current one (headings printed out of order) doesn't pull blocks back.
+      if (start && start.from >= current.from) current = start;
       if (block.kind === "heading") {
         if (namesNode(block.text)) subheading.delete(current.node.id);
         else subheading.set(current.node.id, block.text);

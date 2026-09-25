@@ -1,6 +1,7 @@
 // What every pipeline stage shares: queue names and options, dependencies,
 // and running pg-boss sends inside our own transactions.
 import type { PgBoss } from "pg-boss";
+import type { ChunkOptions } from "../assembly/chunks.ts";
 import type { PageReader } from "../reading/reader.ts";
 import type { Clock } from "../shared/clock.ts";
 import type { Provider } from "../shared/config.ts";
@@ -25,6 +26,8 @@ export interface PipelineDeps {
   clock: Clock;
   /** The page reader for a key's provider. */
   reader(provider: Provider): PageReader;
+  /** Explanation chunk sizes; the defaults when unset. */
+  chunking?: ChunkOptions;
 }
 
 export interface PipelineOptions {
@@ -101,10 +104,11 @@ export async function createQueues(
       deadLetter,
     });
   }
-  // One advance per document at a time: the queue holds one queued or active
-  // job per singleton key.
+  // One advance per document runs at a time, and one more may wait behind it
+  // (`stately`: one job per state per singleton key). A task settling while
+  // an advance is still active queues the next one instead of being dropped.
   await boss.createQueue(queues.advance, {
-    policy: "exclusive",
+    policy: "stately",
     retryLimit: 3,
     retryDelay: options.retryDelay,
     retryBackoff: true,
