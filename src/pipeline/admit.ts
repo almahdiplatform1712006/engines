@@ -7,10 +7,12 @@
 // under a per-key advisory lock, so two admissions for one key never race.
 import type { PgBoss } from "pg-boss";
 import type { OffsetSegment } from "../offset/segments.ts";
+import { lockApiKey } from "../shared/db/locks.ts";
 import type { Db, Queryable } from "../shared/db/pool.ts";
 import { Refusal } from "../shared/refusal.ts";
 import {
   inTransaction,
+  PAGE_READ_GROUP,
   queues,
   startAdvance,
   type DocumentJob,
@@ -24,7 +26,7 @@ async function lockKey(
   tx: Queryable,
   apiKeyId: string,
 ): Promise<{ concurrency: number; maxQueued: number }> {
-  await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [apiKeyId]);
+  await lockApiKey(tx, apiKeyId);
   const { rows } = await tx.query<{ concurrency: number; max_queued: number }>(
     "SELECT concurrency, max_queued FROM api_keys WHERE id = $1",
     [apiKeyId],
@@ -129,9 +131,7 @@ async function startReading(
     await boss.send(
       queues.readPage,
       { documentId, pdfPage: pdf_page } satisfies PageJob,
-      {
-        db: inTransaction(tx),
-      },
+      { db: inTransaction(tx), group: PAGE_READ_GROUP },
     );
   }
   if (pending.rows.length === 0) await startAdvance(boss, tx, documentId);

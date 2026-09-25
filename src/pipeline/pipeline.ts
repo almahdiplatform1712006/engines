@@ -8,6 +8,7 @@
 // records them; the one that reaches zero moves the document on. A task that
 // crashes or runs out of retries reaches its dead-letter queue, whose handler
 // settles it as failed, so a document never waits on a lost task.
+import type { JobWithMetadata } from "pg-boss";
 import { advance, failDocument, runTask, taskDied } from "./advance.ts";
 import {
   createQueues,
@@ -53,7 +54,10 @@ export async function registerPipeline(
         "the book could not be rendered",
       );
   });
-  await boss.work<PageJob>(queues.readPage, busy, async ([job]) => {
+  // Every page read shares one group, so the model sees at most
+  // `globalPageReads` calls at once across all workers.
+  const reads = { ...busy, groupConcurrency: options.globalPageReads };
+  await boss.work<PageJob>(queues.readPage, reads, async ([job]) => {
     if (job) await readPage(deps, job.data);
   });
   await boss.work<PageJob>(queues.readPageDead, poll, async ([job]) => {
@@ -82,15 +86,11 @@ export async function registerPipeline(
   await boss.work(SWEEP_QUEUE, poll, async () => {
     await sweep(deps);
   });
-  await boss.work<WebhookJob>(WEBHOOK_QUEUE, poll, async ([job]) => {
-    if (job) await deliverWebhook(deps, job.data);
-  });
-  await boss.work<DocumentJob>(queues.advanceDead, poll, async ([job]) => {
-    if (job)
-      await failDocument(
-        deps,
-        job.data.documentId,
-        "the result could not be assembled",
-      );
-  });
+  await boss.work(
+    WEBHOOK_QUEUE,
+    { ...poll, includeMetadata: true },
+    async ([job]: JobWithMetadata<WebhookJob>[]) => {
+      if (job) await deliverWebhook(deps, job.data, job.retryCount + 1);
+    },
+  );
 }

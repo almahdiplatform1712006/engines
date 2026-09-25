@@ -6,6 +6,13 @@
 //   exports; its row stays as a tombstone (`expired_at`), so it answers 410.
 // - A draft, or a confirmed outline no document used, is deleted at its expiry.
 // - An upload no document used is deleted at its expiry (2 days).
+import {
+  TERMINAL_STATUSES,
+  type DocumentStatus,
+} from "../contract/document.ts";
+import { sourceKeys, type DocumentSource } from "../documents/store.ts";
+import { failDocument } from "./advance.ts";
+import { IDEMPOTENCY_TTL_MS } from "../shared/limits.ts";
 import type { PipelineDeps } from "./deps.ts";
 
 export interface ExpiryReport {
@@ -14,29 +21,38 @@ export interface ExpiryReport {
   uploads: number;
 }
 
-export async function expire(
-  deps: Pick<PipelineDeps, "db" | "store" | "clock">,
-): Promise<ExpiryReport> {
+export async function expire(deps: PipelineDeps): Promise<ExpiryReport> {
   const now = deps.clock();
 
-  const documents = await deps.db.query<{ id: string }>(
-    "SELECT id FROM documents WHERE expired_at IS NULL AND expires_at <= $1",
+  const documents = await deps.db.query<{
+    id: string;
+    status: string;
+    source: DocumentSource;
+  }>(
+    "SELECT id, status, source FROM documents WHERE expired_at IS NULL AND expires_at <= $1",
     [now],
   );
-  for (const { id } of documents.rows) {
-    await deps.store.deletePrefix(`pages/${id}/`);
-    await deps.store.deletePrefix(`results/${id}/`);
-    await deps.db.transaction(async (tx) => {
-      await tx.query("DELETE FROM revisions WHERE document_id = $1", [id]);
-      await tx.query("DELETE FROM tasks WHERE document_id = $1", [id]);
-      await tx.query("DELETE FROM pages WHERE document_id = $1", [id]);
-      // A job still running at 30 days has gone wrong; it ends as failed.
-      await tx.query(
-        `UPDATE documents SET expired_at = $2,
-           status = CASE WHEN status IN ('completed', 'completed_with_errors', 'failed') THEN status ELSE 'failed' END
-         WHERE id = $1`,
-        [id, now],
+  for (const doc of documents.rows) {
+    // A job still running at 30 days has gone wrong. It ends the usual way:
+    // credits settled, webhook sent, book deleted, slot freed.
+    if (!TERMINAL_STATUSES.includes(doc.status as DocumentStatus)) {
+      await failDocument(
+        deps,
+        doc.id,
+        "expired: the job did not finish within 30 days",
       );
+    }
+    await deps.store.deletePrefix(`pages/${doc.id}/`);
+    await deps.store.deletePrefix(`results/${doc.id}/`);
+    for (const key of sourceKeys(doc.source)) await deps.store.delete(key);
+    await deps.db.transaction(async (tx) => {
+      await tx.query("DELETE FROM revisions WHERE document_id = $1", [doc.id]);
+      await tx.query("DELETE FROM tasks WHERE document_id = $1", [doc.id]);
+      await tx.query("DELETE FROM pages WHERE document_id = $1", [doc.id]);
+      await tx.query("UPDATE documents SET expired_at = $2 WHERE id = $1", [
+        doc.id,
+        now,
+      ]);
     });
   }
 
@@ -55,7 +71,7 @@ export async function expire(
   }
 
   await deps.db.query("DELETE FROM idempotency_keys WHERE created_at <= $1", [
-    new Date(now.getTime() - 24 * 3600 * 1000),
+    new Date(now.getTime() - IDEMPOTENCY_TTL_MS),
   ]);
   return {
     documents: documents.rows.length,

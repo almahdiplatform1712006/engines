@@ -4,13 +4,9 @@ import { z } from "zod";
 import { addDays, type Clock } from "../shared/clock.ts";
 import type { Queryable } from "../shared/db/pool.ts";
 import { newId } from "../shared/ids.ts";
+import { MAX_UPLOAD_BYTES, UPLOAD_TTL_DAYS } from "../shared/limits.ts";
 import { Refusal } from "../shared/refusal.ts";
 import type { BlobStore } from "../storage/store.ts";
-
-/** A book may be up to 500 MB (spec decision Q35). */
-export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-/** Unused uploads are deleted after 2 days, like the bucket's lifecycle rule. */
-export const UPLOAD_TTL_DAYS = 2;
 
 export const PDF = "application/pdf";
 export const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;

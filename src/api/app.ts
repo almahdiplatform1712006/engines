@@ -10,7 +10,7 @@ import {
   CreateOutlineRequest,
   ReplaceOutlineRequest,
 } from "../contract/outline.ts";
-import { createDocument } from "../documents/create.ts";
+import { createDocument, type Created } from "../documents/create.ts";
 import { documentView, liveDocument } from "../documents/store.ts";
 import {
   confirmOutline,
@@ -155,6 +155,12 @@ export function createApp(deps: AppDeps): Hono {
       status: 202,
       body: await createDocument(deps, c.var.caller, body),
     }));
+    // A repeat returns the original document as it is now, not as it was.
+    if (response.replayed) {
+      const created = response.body as Created;
+      const row = await liveDocument(db, c.var.caller.orgId, created.id);
+      return c.json({ ...created, status: row.status }, 202);
+    }
     return c.json(response.body, response.status as 202);
   });
 

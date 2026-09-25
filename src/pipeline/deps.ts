@@ -44,6 +44,8 @@ export interface PipelineOptions {
   pollingIntervalSeconds: number;
   /** Seconds before a failed webhook delivery is retried (backoff doubles it). */
   webhookRetryDelay: number;
+  /** Page reads in flight across every worker at once: the global model-call cap. */
+  globalPageReads: number;
 }
 
 export const DEFAULT_OPTIONS: PipelineOptions = {
@@ -52,7 +54,11 @@ export const DEFAULT_OPTIONS: PipelineOptions = {
   pageAttempts: 3,
   pollingIntervalSeconds: 2,
   webhookRetryDelay: 30,
+  globalPageReads: 32,
 };
+
+/** Every page read joins one group, so pg-boss caps them across all workers. */
+export const PAGE_READ_GROUP = { id: "model-calls" } as const;
 
 export interface DocumentJob {
   documentId: string;
@@ -67,12 +73,9 @@ export interface TaskJob {
   key: string;
 }
 
-/** pg-boss runs inside our transaction when handed one of these. */
-export function inTransaction(tx: Queryable) {
-  return {
-    executeSql: (text: string, values?: unknown[]) => tx.query(text, values),
-  };
-}
+import { inTransaction } from "../shared/db/boss.ts";
+
+export { inTransaction };
 
 /** Creates the queues. The API calls this too, since it sends jobs. */
 export async function createQueues(

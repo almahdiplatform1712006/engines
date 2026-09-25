@@ -2,18 +2,17 @@
 // document's `webhook_url` when a job ends and when a review saves a revision,
 // signed per organisation. Failed deliveries retry with backoff through
 // pg-boss; every attempt is logged in `webhook_deliveries`.
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import type { PgBoss } from "pg-boss";
+import { inTransaction } from "../shared/db/boss.ts";
 import type { Db, Queryable } from "../shared/db/pool.ts";
 import {
   newWebhookSecret,
   SIGNATURE_HEADER,
   signWebhook,
 } from "./signature.ts";
-import {
-  assertPublicTarget,
-  checkWebhookUrl,
-  type TargetPolicy,
-} from "./target.ts";
+import { checkWebhookUrl, pinnedLookup, type TargetPolicy } from "./target.ts";
 
 export const WEBHOOK_QUEUE = "webhook.deliver";
 const TIMEOUT_MS = 10_000;
@@ -56,9 +55,7 @@ export async function enqueueWebhook(
   );
   if (!rows[0]?.webhook_url) return;
   await boss.send(WEBHOOK_QUEUE, job, {
-    db: {
-      executeSql: (text: string, values?: unknown[]) => tx.query(text, values),
-    },
+    db: inTransaction(tx),
   });
 }
 
@@ -77,10 +74,14 @@ export async function webhookSecret(
   return secret;
 }
 
-/** One delivery attempt. Throws on anything but a 2xx, so pg-boss retries it. */
+/**
+ * One delivery attempt (`attempt` counts from 1). Throws on anything but a
+ * 2xx, so pg-boss retries it.
+ */
 export async function deliverWebhook(
   deps: { db: Db; clock: () => Date; webhooks: TargetPolicy },
   job: WebhookJob,
+  attempt: number,
 ): Promise<void> {
   const { rows } = await deps.db.query<{
     org_id: string;
@@ -99,34 +100,20 @@ export async function deliverWebhook(
   };
   const body = JSON.stringify(payload);
   const secret = await webhookSecret(deps.db, doc.org_id);
-  const { rows: previous } = await deps.db.query<{ n: number }>(
-    "SELECT count(*)::int AS n FROM webhook_deliveries WHERE document_id = $1 AND payload = $2",
-    [job.documentId, body],
-  );
-  const attempt = (previous[0]?.n ?? 0) + 1;
 
   let statusCode: number | null = null;
   let error: string | null = null;
   try {
     const url = checkWebhookUrl(doc.webhook_url, deps.webhooks);
-    await assertPublicTarget(url, deps.webhooks);
     const timestamp = Math.floor(deps.clock().getTime() / 1000);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        [SIGNATURE_HEADER]: signWebhook(secret, body, timestamp),
-        "user-agent": "Engines-Webhooks/1",
-      },
+    statusCode = await post(
+      url,
       body,
-      // A redirect could point anywhere, private addresses included.
-      redirect: "manual",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    statusCode = response.status;
-    await response.body?.cancel();
-    if (response.status < 200 || response.status >= 300)
-      error = `HTTP ${String(response.status)}`;
+      signWebhook(secret, body, timestamp),
+      deps.webhooks,
+    );
+    if (statusCode < 200 || statusCode >= 300)
+      error = `HTTP ${String(statusCode)}`;
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   }
@@ -146,4 +133,45 @@ export async function deliverWebhook(
   );
   if (error !== null)
     throw new Error(`webhook delivery ${String(attempt)} failed: ${error}`);
+}
+
+/**
+ * POSTs the body and returns the status code. Redirects aren't followed (a
+ * redirect could point anywhere), and the connection goes to the address the
+ * pinned lookup checked.
+ */
+function post(
+  url: URL,
+  body: string,
+  signature: string,
+  policy: TargetPolicy,
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+    const request = send(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body),
+          [SIGNATURE_HEADER]: signature,
+          "user-agent": "Engines-Webhooks/1",
+        },
+        lookup: pinnedLookup(policy),
+        timeout: TIMEOUT_MS,
+      },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      },
+    );
+    request.on("timeout", () =>
+      request.destroy(
+        new Error(`no response in ${String(TIMEOUT_MS / 1000)} s`),
+      ),
+    );
+    request.on("error", reject);
+    request.end(body);
+  });
 }

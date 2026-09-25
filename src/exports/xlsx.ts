@@ -34,7 +34,8 @@ export async function resultXlsx(input: {
     { header: "Stimulus", key: "stimulus", width: 12 },
     { header: "PDF page", key: "pdf", width: 10 },
     { header: "Printed page", key: "printed", width: 12 },
-    { header: "Flag", key: "flag", width: 22 },
+    { header: "Needs review", key: "review", width: 13 },
+    { header: "Review reason", key: "flag", width: 22 },
     { header: "External ref", key: "ref", width: 16 },
     { header: "Id", key: "id", width: 14 },
   ];
@@ -51,6 +52,7 @@ export async function resultXlsx(input: {
       stimulus: q.stimulus_id ?? "",
       pdf: q.locator.pdf_page,
       printed: q.locator.printed_page,
+      review: q.review_required ? "yes" : "no",
       flag: q.review_reason ?? "",
       ref: q.external_ref ?? "",
       id: q.id,

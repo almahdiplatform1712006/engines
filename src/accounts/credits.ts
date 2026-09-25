@@ -4,6 +4,7 @@
 // its page count when it's created (so two documents can't both spend the
 // same credits), releases the hold when it ends, and writes exactly one
 // usage entry: the pages it read.
+import { lockOrgCredits } from "../shared/db/locks.ts";
 import type { Queryable } from "../shared/db/pool.ts";
 import { Refusal } from "../shared/refusal.ts";
 
@@ -49,9 +50,7 @@ export async function holdCredits(
   documentId: string,
   pages: number,
 ): Promise<void> {
-  await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-    `credits:${orgId}`,
-  ]);
+  await lockOrgCredits(tx, orgId);
   const available = await balance(tx, orgId);
   if (available < pages) {
     throw new Refusal(
@@ -63,6 +62,42 @@ export async function holdCredits(
   await tx.query(
     "INSERT INTO credit_ledger (org_id, kind, pages, document_id) VALUES ($1, 'hold', $2, $3) ON CONFLICT DO NOTHING",
     [orgId, -pages, documentId],
+  );
+}
+
+/**
+ * Makes a document's hold cover `pages`, when rendering found more pages than
+ * the count at creation. Refused with `402` when the balance can't cover the
+ * difference.
+ */
+export async function topUpHold(
+  tx: Queryable,
+  orgId: string,
+  documentId: string,
+  pages: number,
+): Promise<void> {
+  await lockOrgCredits(tx, orgId);
+  const { rows } = await tx.query<{ pages: number }>(
+    "SELECT -pages AS pages FROM credit_ledger WHERE document_id = $1 AND kind = 'hold'",
+    [documentId],
+  );
+  const held = rows[0]?.pages;
+  if (held === undefined) {
+    await holdCredits(tx, orgId, documentId, pages);
+    return;
+  }
+  if (pages <= held) return;
+  const available = await balance(tx, orgId);
+  if (available < pages - held) {
+    throw new Refusal(
+      "insufficient_credits",
+      `This book has ${String(pages)} pages and your balance can't cover the ${String(pages - held)} more it needs.`,
+      { details: { pages, balance: available } },
+    );
+  }
+  await tx.query(
+    "UPDATE credit_ledger SET pages = $2 WHERE document_id = $1 AND kind = 'hold'",
+    [documentId, -pages],
   );
 }
 
@@ -107,21 +142,4 @@ export async function ledger(
     [orgId, limit],
   );
   return rows.map((r) => ({ ...r, created_at: r.created_at.toISOString() }));
-}
-
-/** A book whose page count isn't known yet still needs some credit to start. */
-export async function requireSomeCredit(
-  db: Queryable,
-  orgId: string,
-): Promise<void> {
-  const available = await balance(db, orgId);
-  if (available <= 0) {
-    throw new Refusal(
-      "insufficient_credits",
-      `Your balance is ${String(available)} page credits.`,
-      {
-        details: { pages: null, balance: available },
-      },
-    );
-  }
 }

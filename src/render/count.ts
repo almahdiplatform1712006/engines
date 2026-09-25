@@ -19,39 +19,56 @@ class StoreRanges extends PDFDataRangeTransport {
     this.read = read;
   }
 
+  /** Set when a range can't be read; pdf.js's own abort does nothing. */
+  onFailure: (error: unknown) => void = () => undefined;
+
   override requestDataRange(begin: number, end: number): void {
     this.read(begin, end).then(
       (chunk) => {
         this.onDataRange(begin, new Uint8Array(chunk));
       },
-      () => {
-        this.abort();
+      (error: unknown) => {
+        this.onFailure(error);
       },
     );
   }
 }
 
-/** The PDF's page count, or null when pdf.js can't read it (poppler decides at render). */
+/** Give up on pdf.js after this long; the caller falls back to poppler. */
+const TIMEOUT_MS = 30_000;
+
+/** The PDF's page count, or null when pdf.js can't read it in time. */
 export async function countPdfPages(
   store: BlobStore,
   key: string,
   size: number,
 ): Promise<number | null> {
+  const ranges = new StoreRanges(size, (begin, end) =>
+    store.readRange(key, begin, end),
+  );
   const task = getDocument({
-    range: new StoreRanges(size, (begin, end) =>
-      store.readRange(key, begin, end),
-    ),
+    range: ranges,
     rangeChunkSize: 256 * 1024,
     disableAutoFetch: true,
     disableStream: true,
     verbosity: 0,
   });
+  let timer: NodeJS.Timeout | undefined;
+  const failed = new Promise<null>((resolve) => {
+    ranges.onFailure = () => {
+      resolve(null);
+    };
+    timer = setTimeout(() => {
+      resolve(null);
+    }, TIMEOUT_MS);
+  });
   try {
-    const doc = await task.promise;
-    return doc.numPages;
-  } catch {
-    return null;
+    return await Promise.race([
+      task.promise.then((doc) => doc.numPages).catch(() => null),
+      failed,
+    ]);
   } finally {
+    clearTimeout(timer);
     await task.destroy();
   }
 }

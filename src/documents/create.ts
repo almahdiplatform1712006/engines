@@ -1,9 +1,10 @@
 // `POST /v1/documents`: every check a new document passes before it is queued
 // (spec #1 §3), then the insert and admission in one transaction.
 import type { PgBoss } from "pg-boss";
-import { holdCredits, requireSomeCredit } from "../accounts/credits.ts";
+import { holdCredits } from "../accounts/credits.ts";
 import { requireEntitlement } from "../accounts/entitlements.ts";
 import { countPdfPages } from "../render/count.ts";
+import { pageCount as popplerPageCount } from "../render/render.ts";
 import type { Caller } from "../accounts/keys.ts";
 import type { CreateDocumentRequest } from "../contract/document.ts";
 import { getOutline, markInUse } from "../outline/store.ts";
@@ -11,19 +12,17 @@ import type { Warning } from "../contract/document.ts";
 import { admit, checkQueueRoom } from "../pipeline/admit.ts";
 import { checkWebhookUrl, type TargetPolicy } from "../webhooks/target.ts";
 import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { addDays, DAY_MS, type Clock } from "../shared/clock.ts";
 import type { Db } from "../shared/db/pool.ts";
 import { newId } from "../shared/ids.ts";
+import { DOCUMENT_TTL_DAYS, MAX_PAGES } from "../shared/limits.ts";
 import { Refusal } from "../shared/refusal.ts";
 import type { BlobStore } from "../storage/store.ts";
 import { claimUploads, finishedUpload, PDF } from "../uploads/uploads.ts";
 import type { DocumentSource } from "./store.ts";
-
-/** A book may be up to 800 pages (spec decision Q35). */
-export const MAX_PAGES = 800;
-
-/** Results, page images and exports are kept this long (spec §1 step 8). */
-export const DOCUMENT_TTL_DAYS = 30;
 
 export interface CreateDeps {
   db: Db;
@@ -64,7 +63,7 @@ export async function createDocument(
     checkWebhookUrl(request.webhook_url, deps.webhooks);
   const source = await resolveSource(deps, caller.orgId, request.source);
   const pageCount = await countPages(deps.store, source);
-  if (pageCount !== null && pageCount > MAX_PAGES) {
+  if (pageCount > MAX_PAGES) {
     throw new Refusal(
       "too_large",
       `Books can be up to ${String(MAX_PAGES)} pages; this one has ${String(pageCount)}.`,
@@ -107,10 +106,8 @@ export async function createDocument(
       ],
     );
     await claimUploads(tx, id, uploadIds);
-    // 402 when the balance can't cover the book. A PDF pdf.js couldn't count
-    // is held when rendering has counted it.
-    if (pageCount !== null) await holdCredits(tx, caller.orgId, id, pageCount);
-    else await requireSomeCredit(tx, caller.orgId);
+    // 402 when the balance can't cover the book.
+    await holdCredits(tx, caller.orgId, id, pageCount);
     await markInUse(tx, outline.id);
     await admit(deps.boss, tx, caller.apiKeyId);
     const { rows } = await tx.query<{ status: string }>(
@@ -210,12 +207,31 @@ async function sameFileWarning(
   };
 }
 
-/** Pages in the book: photos one each, a PDF counted from storage. Null when unreadable. */
+/**
+ * Pages in the book: photos one each; a PDF counted from storage with pdf.js
+ * (byte ranges only), or, when pdf.js can't read it, downloaded and counted
+ * by poppler. A file neither can read is refused.
+ */
 async function countPages(
   store: BlobStore,
   source: DocumentSource,
-): Promise<number | null> {
+): Promise<number> {
   if (source.kind === "images") return source.uploads.length;
   const size = await store.size(source.storage_key);
-  return size === null ? null : countPdfPages(store, source.storage_key, size);
+  const counted =
+    size === null ? null : await countPdfPages(store, source.storage_key, size);
+  if (counted !== null) return counted;
+  const dir = await mkdtemp(join(tmpdir(), "engines-count-"));
+  try {
+    const file = join(dir, "book.pdf");
+    await writeFile(file, await store.get(source.storage_key));
+    return await popplerPageCount(file);
+  } catch {
+    throw new Refusal(
+      "unsupported_file",
+      "This file isn't a PDF Engines can read.",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }

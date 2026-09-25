@@ -21,7 +21,11 @@ import type { Join } from "../assembly/continuations.ts";
 import { findPairs, type Pair } from "../assembly/continuations.ts";
 import { cropImage } from "../render/crop.ts";
 import { loadPageImage } from "./pages.ts";
-import { loadDocument, type DocumentRow } from "../documents/store.ts";
+import {
+  loadDocument,
+  sourceKeys,
+  type DocumentRow,
+} from "../documents/store.ts";
 import { IDENTITY } from "../offset/segments.ts";
 import { getOutline } from "../outline/store.ts";
 import type { Block, PageReading } from "../reading/blocks.ts";
@@ -374,11 +378,7 @@ export async function failDocument(
  * review), and the key's slot goes to its next waiting document.
  */
 async function afterEnd(deps: PipelineDeps, doc: DocumentRow): Promise<void> {
-  const keys =
-    doc.source.kind === "pdf"
-      ? [doc.source.storage_key]
-      : doc.source.uploads.map((u) => u.storage_key);
-  for (const key of keys) await deps.store.delete(key);
+  for (const key of sourceKeys(doc.source)) await deps.store.delete(key);
   await admitNext(deps, doc.api_key_id);
 }
 

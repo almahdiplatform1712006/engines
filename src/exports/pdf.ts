@@ -25,23 +25,45 @@ export async function chromiumPath(
   throw new Error("No Chromium found for PDF exports; set CHROMIUM_PATH");
 }
 
+/** Chromium is heavy: at most this many print at once in one process. */
+const MAX_PRINTING = 2;
+let printing = 0;
+const waiting: (() => void)[] = [];
+
+/**
+ * Prints the page. The page gets no network at all (everything it shows is
+ * inlined), so book content can never make Chromium fetch anything.
+ */
 export async function htmlToPdf(
   html: string,
   executablePath: string,
 ): Promise<Buffer> {
-  const browser = await chromium.launch({
-    executablePath,
-    args: ["--no-sandbox", "--disable-dev-shm-usage"],
-  });
+  if (printing >= MAX_PRINTING)
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  printing++;
   try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "load" });
-    return await page.pdf({
-      format: "A4",
-      printBackground: true,
-      preferCSSPageSize: true,
+    const browser = await chromium.launch({
+      executablePath,
+      args: ["--no-sandbox", "--disable-dev-shm-usage"],
     });
+    try {
+      const context = await browser.newContext({
+        javaScriptEnabled: false,
+        offline: true,
+      });
+      await context.route("**/*", (route) => route.abort());
+      const page = await context.newPage();
+      await page.setContent(html, { waitUntil: "load" });
+      return await page.pdf({
+        format: "A4",
+        printBackground: true,
+        preferCSSPageSize: true,
+      });
+    } finally {
+      await browser.close();
+    }
   } finally {
-    await browser.close();
+    printing--;
+    waiting.shift()?.();
   }
 }

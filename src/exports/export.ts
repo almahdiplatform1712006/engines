@@ -47,12 +47,6 @@ export async function exportDocument(
   row: DocumentRow,
   format: ExportFormat,
 ): Promise<Exported> {
-  if (row.status !== "completed" && row.status !== "completed_with_errors") {
-    throw new Refusal(
-      "wrong_state",
-      `Document ${row.id} is ${row.status}; exports are ready once it completes.`,
-    );
-  }
   const title = await titleOf(deps.db, row);
   const filename = `${safeName(title)}.${format}`;
   const contentType = CONTENT_TYPES[format];
@@ -67,6 +61,12 @@ export async function exportDocument(
     };
   }
 
+  if (row.status !== "completed" && row.status !== "completed_with_errors") {
+    throw new Refusal(
+      "wrong_state",
+      `Document ${row.id} is ${row.status}; files are ready once it completes.`,
+    );
+  }
   const latest = await latestResult(deps.db, row.id);
   if (!latest)
     throw new Refusal("wrong_state", `Document ${row.id} has no result yet.`);

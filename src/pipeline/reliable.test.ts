@@ -187,6 +187,11 @@ describe("idempotency", () => {
       [request.outline_id],
     );
     assert.equal(rows[0]?.n, 1);
+    const jobs = await h.db.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM pgboss.job WHERE name = 'document.render' AND data->>'documentId' = $1",
+      [first.id],
+    );
+    assert.equal(jobs.rows[0]?.n, 1, "one render job");
 
     const different = await send({ ...request, type: "both" });
     assert.equal(different.status, 422);

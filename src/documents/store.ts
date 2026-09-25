@@ -21,6 +21,13 @@ export type DocumentSource =
   | { kind: "pdf"; upload_id: string; storage_key: string }
   | { kind: "images"; uploads: { upload_id: string; storage_key: string }[] };
 
+/** The storage keys of a document's book: the PDF, or every photo. */
+export function sourceKeys(source: DocumentSource): string[] {
+  return source.kind === "pdf"
+    ? [source.storage_key]
+    : source.uploads.map((u) => u.storage_key);
+}
+
 export interface DocumentRow {
   id: string;
   org_id: string;

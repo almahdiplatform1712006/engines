@@ -18,8 +18,8 @@ import {
 } from "../render/render.ts";
 import { parsePrintedNumber } from "../shared/text.ts";
 import { inBatches, providerOf, type PipelineDeps } from "./deps.ts";
-import { holdCredits } from "../accounts/credits.ts";
-import { MAX_PAGES } from "../documents/create.ts";
+import { topUpHold } from "../accounts/credits.ts";
+import { MAX_PAGES } from "../shared/limits.ts";
 import { Refusal } from "../shared/refusal.ts";
 import { admit } from "./admit.ts";
 import { failDocument } from "./advance.ts";
@@ -178,7 +178,7 @@ async function quickPass(
 
 /**
  * poppler's page count against the limits (E-14): over 800 pages fails the
- * document, and a book pdf.js couldn't count at creation is held now, or
+ * document, and a hold smaller than the count grows to match or the document
  * fails for want of credits. False when the document failed.
  */
 async function withinLimits(
@@ -194,15 +194,9 @@ async function withinLimits(
     );
     return false;
   }
-  const held = await deps.db.query(
-    "SELECT 1 FROM credit_ledger WHERE document_id = $1 AND kind = 'hold'",
-    [doc.id],
-  );
-  if (held.rows.length > 0) return true;
   try {
-    await deps.db.transaction((tx) =>
-      holdCredits(tx, doc.org_id, doc.id, count),
-    );
+    // poppler has the last word on the page count: the hold grows to match.
+    await deps.db.transaction((tx) => topUpHold(tx, doc.org_id, doc.id, count));
     return true;
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;

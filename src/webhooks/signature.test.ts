@@ -61,4 +61,11 @@ test("webhook URLs: https only, never private or metadata addresses", () => {
     assert.equal(isPrivateAddress(address), true, address);
   }
   assert.equal(isPrivateAddress("8.8.8.8"), false);
+  assert.equal(isPrivateAddress("2001:4860:4860::8888"), false);
+  // Node writes [::ffff:169.254.169.254] as [::ffff:a9fe:a9fe]; refused either way.
+  assert.throws(() =>
+    checkWebhookUrl("https://[::ffff:169.254.169.254]/", {
+      allowPrivate: false,
+    }),
+  );
 });
