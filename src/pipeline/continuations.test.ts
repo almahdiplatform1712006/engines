@@ -63,7 +63,7 @@ test("flagged pairs are re-read together and joined; unpaired flags are never lo
 
   assert.deepEqual(
     doc.stimuli.map((s) => [s.text, s.pages]),
-    [["النص يبدأ ويكمل هنا", [1]]],
+    [["النص يبدأ ويكمل هنا", [1, 2]]],
   );
   assert.deepEqual(
     doc.questions.map((q) => [q.number, q.review_reason]),
