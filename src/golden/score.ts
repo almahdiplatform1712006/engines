@@ -92,7 +92,7 @@ export const METRICS = {
 } satisfies Record<string, Metric>;
 
 export type MetricName = keyof typeof METRICS;
-const METRIC_NAMES = Object.keys(METRICS) as MetricName[];
+export const METRIC_NAMES = Object.keys(METRICS) as MetricName[];
 
 const RatioSchema = z.object({ num: z.number(), den: z.number() });
 const Scores = z.object(
@@ -277,7 +277,7 @@ const UNITS: Record<
   iou: { value: (v) => v.toFixed(3), change: (size) => size.toFixed(3) },
 };
 
-function show(metric: MetricName, v: number | null): string {
+export function show(metric: MetricName, v: number | null): string {
   return v === null ? "—" : UNITS[METRICS[metric].unit].value(v);
 }
 

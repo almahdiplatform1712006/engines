@@ -2,6 +2,7 @@
 // npm run golden:sheet -- <book>
 // npm run golden:score -- [<book> …] [--baseline <run.json>]
 // npm run golden:score -- --compare <a.json> <b.json>
+// npm run golden:trial -- [--config golden/trial.json] [<book> …]
 import { readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -16,6 +17,7 @@ import {
   writeRun,
 } from "./score.ts";
 import { writeCorrectionSheet } from "./sheet.ts";
+import { runTrial, TrialConfig, trialReport, writeReport } from "./trial.ts";
 import type { PageFailure } from "./truth.ts";
 
 const ROOT = fileURLToPath(new URL("../../golden/", import.meta.url));
@@ -29,6 +31,8 @@ async function main(argv: string[]): Promise<number> {
       return sheet(rest);
     case "score":
       return score(rest);
+    case "trial":
+      return trial(rest);
     default:
       throw new Error(
         `unknown command "${command ?? ""}": expected draft, sheet or score`,
@@ -108,6 +112,30 @@ async function score(args: string[]): Promise<number> {
     console.log(`\n${formatComparison(await loadRun(values.baseline), run)}`);
   }
   return run.failures.length === 0 ? 0 : 1;
+}
+
+async function trial(args: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: { config: { type: "string", default: `${ROOT}trial.json` } },
+  });
+  const config = await readJson(values.config, TrialConfig, "trial config");
+  const books = positionals.length > 0 ? positionals : await allBooks();
+  if (books.length === 0)
+    throw new Error(`no books with a manifest.json in ${ROOT}`);
+  const runs = await runTrial({ root: ROOT, books, config, env: process.env });
+  for (const { setup, run } of runs)
+    console.log(`\n${setup.name}\n${formatRun(run)}`);
+  const report = fileURLToPath(
+    new URL("../../docs/decisions/0001-page-reading.md", import.meta.url),
+  );
+  await writeReport(
+    report,
+    trialReport(runs, new Date().toISOString().slice(0, 10)),
+  );
+  console.log(`\nwrote ${report}: add the recommendation, then ask the owner.`);
+  return runs.some((r) => r.run.failures.length > 0) ? 1 : 0;
 }
 
 function printFailure(book: string, failure: PageFailure): void {

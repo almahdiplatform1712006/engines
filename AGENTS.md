@@ -108,6 +108,17 @@ curl -s localhost:8080/v1/documents -H "authorization: Bearer $KEY" -H 'content-
 curl -s localhost:8080/v1/documents/<document_id> -H "authorization: Bearer $KEY"
 ```
 
+## API description and typed client
+
+`openapi.json` is generated from the Zod schemas in `src/contract/`, and the typed client's types (`client/src/schema.ts`) from it. After changing a schema:
+
+```sh
+npm run openapi                 # rewrite both; CI runs `npm run openapi -- --check`
+npm run client:pack             # client/engines-client-<version>.tgz
+```
+
+How another platform uses Engines: `docs/integrate.md`.
+
 ## Golden set
 
 Extraction quality is measured against hand-corrected pages. See `golden/README.md` for the format and workflow.
@@ -119,6 +130,10 @@ npm run golden:score -- --compare golden/runs/<a>.json golden/runs/<b>.json
 ```
 
 Book page images are copyright: never commit them.
+
+## Releasing
+
+Staging and production, the owner's checklist and rollback: `docs/release.md` (`scripts/deploy.sh`, `scripts/rollback.sh`, dry run unless `--yes`).
 
 ## CI
 

@@ -1,0 +1,24 @@
+{
+  "setups": [
+    {
+      "name": "Model A alone",
+      "reader": "model",
+      "model": "<openrouter model id>"
+    },
+    {
+      "name": "Gemini alone",
+      "reader": "model",
+      "model": "<a Gemini-class model id>"
+    },
+    {
+      "name": "Model A + Azure Layout",
+      "reader": "model+azure",
+      "model": "<openrouter model id>"
+    },
+    {
+      "name": "Model A + Mistral OCR",
+      "reader": "model+mistral",
+      "model": "<openrouter model id>"
+    }
+  ]
+}

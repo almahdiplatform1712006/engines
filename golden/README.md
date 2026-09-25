@@ -128,3 +128,41 @@ Each score is kept as a numerator and denominator, so pages add up into run tota
 Questions and stimuli are matched to the truth by text similarity after normalisation (at least 70% alike, best pairs first). Text is normalised before every comparison: tatweel is stripped, `أ إ آ ٱ` become `ا`, `ى ی` become `ي`, Arabic-Indic digits become ASCII, and whitespace is collapsed.
 
 The scorers are plain TypeScript (`src/golden/scorers.ts`), so a promptfoo config can call them later if we want its UI.
+
+## Building the set (E-04, the owner)
+
+About 3 books, about 40 pages, mostly scans. Tick each off as the pages go in:
+
+- [ ] Arabic physics, with math written right-to-left in Arabic symbols (if any book has it)
+- [ ] Arabic math or chemistry (math left-to-right)
+- [ ] English, with a reading passage that several questions share
+- [ ] At least one CamScanner or phone scan, including a page whose content is cut off at the edge
+- [ ] A contents page (it also checks syllabus drafting, E-16)
+- [ ] An answer-key page
+- [ ] A page shared by two lessons
+- [ ] A passage that runs onto the next page
+- [ ] A page with a hand-marked answer
+
+For each book: put the page images in its folder (never committed), list them in `manifest.json`, run `npm run golden:draft -- <book>` with `GOLDEN_READER=model`, correct each page in the correction sheet, and set `"status": "corrected"`.
+
+### Math direction per subject
+
+Decision Q25 said it varies. Record what the books show:
+
+| Subject | Book | Math direction | Symbols (Arabic / Latin) |
+| ------- | ---- | -------------- | ------------------------ |
+|         |      |                |                          |
+
+## The reading trial (E-06)
+
+With the corrected set in place, compare set-ups on it:
+
+```sh
+cp golden/trial.example.json golden/trial.json   # fill in the model ids
+# .env: AI_MODEL is set per set-up; OPENROUTER_API_KEY, and for the add-ons
+# AZURE_DI_ENDPOINT, AZURE_DI_KEY, AZURE_DI_PRICE_PER_PAGE,
+# MISTRAL_API_KEY, MISTRAL_OCR_MODEL, MISTRAL_OCR_PRICE_PER_PAGE
+npm run golden:trial
+```
+
+Each set-up's run is written to `runs/`, and the numbers table to `docs/decisions/0001-page-reading.md`. Printed-page accuracy, crop IoU and cost per page come first: they're what an add-on would be bought for. Write the recommendation there, and ask the owner to choose. The add-ons are trial code only (`src/golden/azure.ts`, `mistral.ts`); nothing reaches the pipeline unless adopted.

@@ -23,6 +23,7 @@
     "golden:draft": "node --env-file-if-exists=.env src/golden/cli.ts draft",
     "golden:sheet": "node src/golden/cli.ts sheet",
     "golden:score": "node --env-file-if-exists=.env src/golden/cli.ts score",
+    "golden:trial": "node --env-file-if-exists=.env src/golden/cli.ts trial",
     "typecheck": "tsc && tsc -p web",
     "lint": "eslint .",
     "format": "prettier --write .",
