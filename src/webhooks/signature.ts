@@ -1,7 +1,8 @@
 // Webhook signatures (E-13). Each organisation has a secret; every delivery
 // carries `Engines-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256>` over
 // `<t>.<raw body>`. `verifyWebhook` is what a receiver runs (docs/webhooks.md);
-// the typed client re-exports it (E-21).
+// the typed client has its own, on Web Crypto (client/src/webhook.ts), and a
+// test keeps the two agreeing.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const SIGNATURE_HEADER = "engines-signature";

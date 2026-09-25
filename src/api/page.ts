@@ -5,7 +5,15 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { createApiKey, listKeys, revokeKey } from "../accounts/keys.ts";
 import { strongestRole, type PageSession } from "../accounts/sessions.ts";
+import { deleteCookie, setCookie } from "hono/cookie";
 import { balance } from "../accounts/credits.ts";
+import {
+  openLink,
+  VISIT_COOKIE,
+  VISIT_TTL_MS,
+  visitReaches,
+  type Visit,
+} from "../accounts/visits.ts";
 import { CreateDocumentRequest } from "../contract/document.ts";
 import { examineBook } from "../documents/create.ts";
 import { liveDocument } from "../documents/store.ts";
@@ -41,15 +49,96 @@ export function pageRoutes(
   // Before sign-in: which ways in the page offers.
   page.get("/config", (c) => c.json({ google: deps.google }));
 
+  // A one-time link from another platform (E-21): opened once, it becomes a
+  // visit cookie, and the page goes to the visit's outline or document. The
+  // token leaves the URL at once and isn't sent on as a Referer.
+  page.get("/enter", async (c) => {
+    c.header("referrer-policy", "no-referrer");
+    c.header("cache-control", "no-store");
+    const token = c.req.query("token") ?? "";
+    // Someone signed in to Engines would silently become a visitor in another
+    // organisation: ask first (a link could be sent to trick them).
+    if (
+      c.req.query("switch") !== "1" &&
+      (await deps.auth.api.getSession({ headers: c.req.raw.headers }))
+    ) {
+      const next = `/page/enter?token=${encodeURIComponent(token)}&switch=1`;
+      return c.html(
+        `<!doctype html><html dir="rtl" lang="ar"><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
+          `<body style="font-family:system-ui;max-inline-size:32rem;margin:2rem auto;padding-inline:1rem">` +
+          `<p>أنت مسجّل الدخول في إنجنز. هذا الرابط يفتح إنجنز كزائر من منصة أخرى، لمنهج أو كتاب واحد.</p>` +
+          `<p dir="ltr">You're signed in to Engines. This link opens Engines as another platform's visitor, for one outline or book.</p>` +
+          `<p><a href="${next}">متابعة كزائر · Continue as a visitor</a></p>` +
+          `<p><a href="/">البقاء في حسابي · Stay in my account</a></p></body></html>`,
+      );
+    }
+    const opened = await openLink(db, deps.clock, token);
+    if (!opened) {
+      return c.text(
+        "This link has already been used or has expired. Go back and open Engines again.",
+        410,
+      );
+    }
+    const { visit } = opened;
+    setCookie(c, VISIT_COOKIE, opened.cookie, {
+      httpOnly: true,
+      sameSite: "Lax",
+      secure: deps.origins[0]?.startsWith("https:") ?? false,
+      path: "/",
+      maxAge: VISIT_TTL_MS / 1000,
+    });
+    return c.redirect(
+      visit.outlineId
+        ? `/o/${visit.orgId}/outlines/${visit.outlineId}`
+        : `/o/${visit.orgId}/documents/${visit.documentId ?? ""}`,
+      302,
+    );
+  });
+
+  // Leaving a visit ("back" to the platform): the visit's cookie goes, so the
+  // browser is itself again.
+  page.post("/leave-visit", (c) => {
+    const origin = c.req.header("origin");
+    if (!origin || !deps.origins.includes(origin))
+      throw new Refusal(
+        "forbidden",
+        "This request must come from Engines' page.",
+      );
+    deleteCookie(c, VISIT_COOKIE, { path: "/" });
+    return c.body(null, 204);
+  });
+
   page.use(async (c, next) => {
     const session = await readSession(deps, c);
     if (!session) return unauthorized(c, "Sign in first.");
+    if (session.visit)
+      await checkPageVisit(db, session.visit, c.req.method, c.req.path);
     c.set("session", session);
     return next();
   });
 
   page.get("/me", async (c) => {
-    const { user, active } = c.var.session;
+    const { user, active, visit } = c.var.session;
+    if (visit) {
+      const { rows } = await db.query<{ id: string; name: string }>(
+        "SELECT id, name FROM organisations WHERE id = $1",
+        [visit.orgId],
+      );
+      return c.json({
+        user: null,
+        visit: {
+          return_url: visit.returnUrl,
+          outline_id: visit.outlineId,
+          document_id: visit.documentId,
+        },
+        organisations: rows.map((o) => ({
+          ...o,
+          role: "visitor",
+          entitlements: [],
+        })),
+        active: { id: visit.orgId, role: "visitor" },
+      });
+    }
     const { rows } = await db.query<{
       id: string;
       name: string;
@@ -187,4 +276,27 @@ export function pageRoutes(
   });
 
   return page;
+}
+
+/** A visit on the page reaches who it is, the estimate, and its own document's pages. */
+async function checkPageVisit(
+  db: Db,
+  visit: Visit,
+  method: string,
+  path: string,
+): Promise<void> {
+  const route = path.replace(/^\/page/, "");
+  if (route === "/me" || (method === "POST" && route === "/estimate")) return;
+  const pages = /^\/documents\/([^/]+)\/pages\/[^/]+(\/questions)?$/.exec(
+    route,
+  );
+  if (pages?.[1]) {
+    if (!(await visitReaches(db, visit, { documentId: pages[1] })))
+      throw new Refusal("not_found", "Not found.");
+    return;
+  }
+  throw new Refusal(
+    "forbidden",
+    "A visit reaches only its outline or document.",
+  );
 }

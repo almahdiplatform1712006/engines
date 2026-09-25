@@ -8,3 +8,6 @@ coverage/
 .claude/worktrees/
 .data/
 web/dist/
+client/dist/
+client/*.tgz
+deploy/

@@ -42,9 +42,17 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
+      # openapi.json and the client's types must match the Zod schemas.
+      - run: npm run openapi -- --check
       - run: npm test
       # Engines' page in a real browser (the runner's Google Chrome).
       - run: npm run test:page
+      # The typed client, built and packed as a tarball.
+      - run: npm run client:pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engines-client
+          path: client/*.tgz
 
   docker:
     name: docker build

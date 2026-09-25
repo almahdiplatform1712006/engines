@@ -48,7 +48,19 @@ export async function api<T>(
 }
 
 export interface Me {
-  user: { id: string; name: string; email: string; super_admin: boolean };
+  /** Null for another platform's visitor (E-21). */
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    super_admin: boolean;
+  } | null;
+  /** Set for a visitor: where "back" goes and what the visit reaches. */
+  visit?: {
+    return_url: string;
+    outline_id: string | null;
+    document_id: string | null;
+  };
   organisations: {
     id: string;
     name: string;

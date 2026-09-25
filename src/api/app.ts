@@ -41,7 +41,12 @@ import {
 import { chromiumPath } from "../exports/pdf.ts";
 import { errorResponse, readBody, unauthorized } from "./errors.ts";
 import { adminRoutes } from "./admin.ts";
+import { API_VERSION, openApi } from "./openapi.ts";
 import { pageRoutes } from "./page.ts";
+import { checkVisit } from "./visit-scope.ts";
+import { createLink } from "../accounts/visits.ts";
+import { CreateSessionRequest } from "../contract/misc.ts";
+import { checkWebhookUrl } from "../webhooks/target.ts";
 import { allowedOrigins, readSession } from "./page-session.ts";
 import {
   IDEMPOTENCY_HEADER,
@@ -82,6 +87,7 @@ export function createApp(deps: AppDeps): Hono {
     auth,
     db,
     origins: allowedOrigins(auth.options.baseURL, auth.options.trustedOrigins),
+    clock,
   };
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
   app.route("/page/admin", adminRoutes(session));
@@ -94,6 +100,10 @@ export function createApp(deps: AppDeps): Hono {
       google: auth.options.socialProviders !== undefined,
     }),
   );
+
+  // The API described (E-21), from the same schemas the routes check with.
+  const spec = openApi(API_VERSION);
+  app.get("/v1/openapi.json", (c) => c.json(spec));
 
   // An API key when one is sent; otherwise the person signed in to the page,
   // acting for their organisation.
@@ -108,8 +118,36 @@ export function createApp(deps: AppDeps): Hono {
       if (signedIn) caller = await sessionCaller(db, signedIn);
     }
     if (!caller) return unauthorized(c);
+    if (caller.visit) await checkVisit(db, caller.visit, c);
     c.set("caller", caller);
     return next();
+  });
+
+  // Another platform sends its person to the page (E-21). Only API keys make
+  // links: a visit can't make another, nor can the page.
+  v1.post("/sessions", async (c) => {
+    const { caller } = c.var;
+    if (caller.userId !== null || caller.visit)
+      throw new Refusal("forbidden", "Session links are made with an API key.");
+    const body = await readBody(c, CreateSessionRequest);
+    if (body.webhook_url !== undefined)
+      checkWebhookUrl(body.webhook_url, deps.webhooks);
+    const { token, expiresAt } = await createLink(db, clock, {
+      orgId: caller.orgId,
+      apiKeyId: caller.apiKeyId,
+      outlineId: body.outline_id ?? null,
+      documentId: body.document_id ?? null,
+      returnUrl: body.return_url,
+      webhookUrl: body.webhook_url ?? null,
+    });
+    return c.json(
+      {
+        object: "session",
+        url: `${new URL(auth.options.baseURL).origin}/page/enter?token=${token}`,
+        expires_at: expiresAt.toISOString(),
+      },
+      201,
+    );
   });
 
   v1.post("/uploads", async (c) => {
@@ -190,7 +228,15 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   v1.post("/documents", async (c) => {
-    const body = await readBody(c, CreateDocumentRequest);
+    const sent = await readBody(c, CreateDocumentRequest);
+    // A visit's documents report to the webhook its link named, never one
+    // the page sends.
+    const { visit } = c.var.caller;
+    const body = { ...sent };
+    if (visit) {
+      delete body.webhook_url;
+      if (visit.webhookUrl) body.webhook_url = visit.webhookUrl;
+    }
     const response = await once(c, "POST /v1/documents", body, async () => ({
       status: 202,
       body: await createDocument(deps, c.var.caller, body),

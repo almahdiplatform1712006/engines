@@ -12,6 +12,7 @@ import {
 } from "../contract/document.ts";
 import { sourceKeys, type DocumentSource } from "../documents/store.ts";
 import { failDocument } from "./advance.ts";
+import { removeOldLinks } from "../accounts/visits.ts";
 import { IDEMPOTENCY_TTL_MS } from "../shared/limits.ts";
 import type { PipelineDeps } from "./deps.ts";
 
@@ -77,6 +78,7 @@ export async function expire(deps: PipelineDeps): Promise<ExpiryReport> {
   await deps.db.query("DELETE FROM idempotency_keys WHERE created_at <= $1", [
     new Date(now.getTime() - IDEMPOTENCY_TTL_MS),
   ]);
+  await removeOldLinks(deps.db, deps.clock);
   return {
     documents: documents.rows.length,
     outlines: outlines.rowCount ?? 0,

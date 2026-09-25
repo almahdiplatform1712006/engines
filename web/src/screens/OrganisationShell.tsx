@@ -22,6 +22,8 @@ const TABS = ["books", "new", "keys", "members", "usage"] as const;
 
 export function OrganisationShell(props: {
   me: Me;
+  /** Another platform's visitor: only the flow, no tabs. */
+  visitor?: boolean;
   organisation: Organisation;
   screen: string;
   rest: string[];
@@ -94,17 +96,19 @@ export function OrganisationShell(props: {
   }
   return (
     <div className="shell">
-      <nav className="tabs" aria-label={organisation.name}>
-        {TABS.map((s) => (
-          <Link
-            key={s}
-            to={`/o/${organisation.id}/${s}`}
-            className={props.screen === s ? "tab active" : "tab"}
-          >
-            {labels[s]}
-          </Link>
-        ))}
-      </nav>
+      {!props.visitor && (
+        <nav className="tabs" aria-label={organisation.name}>
+          {TABS.map((s) => (
+            <Link
+              key={s}
+              to={`/o/${organisation.id}/${s}`}
+              className={props.screen === s ? "tab active" : "tab"}
+            >
+              {labels[s]}
+            </Link>
+          ))}
+        </nav>
+      )}
       {screen}
     </div>
   );

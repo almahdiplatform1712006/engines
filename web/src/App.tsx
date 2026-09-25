@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
-import { api, authClient, type Me } from "./api.ts";
-import { useI18n } from "./i18n.tsx";
+import { api, ApiError, authClient, type Me } from "./api.ts";
+import { fill, useI18n } from "./i18n.tsx";
 import { Link, matchOrg, navigate, safeDecode, usePath } from "./router.tsx";
 
 import { AcceptInvitation } from "./screens/AcceptInvitation.tsx";
@@ -20,24 +20,43 @@ export function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
+  const [checked, setChecked] = useState(false);
   const refresh = useCallback(async () => {
     try {
       setMe(await api<Me>("GET", "/page/me"));
       setFailed(null);
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : String(e));
+      // Not signed in (and no visit): the sign-in screen.
+      if (e instanceof ApiError && e.status === 401) setMe(null);
+      else setFailed(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChecked(true);
     }
   }, []);
 
+  // A visitor from another platform has no sign-in, only a visit cookie the
+  // page can't see: /page/me says which it is.
   const signedIn = session.data != null;
   useEffect(() => {
-    if (signedIn) void refresh();
-    else setMe(null);
-  }, [signedIn, refresh]);
+    if (!session.isPending) void refresh();
+  }, [signedIn, session.isPending, refresh]);
+  const visit = me?.visit;
 
-  // Where a signed-in person with nowhere in particular to go lands.
+  // Where a signed-in person with nowhere in particular to go lands; a
+  // visitor only ever goes to their outline or document.
   useEffect(() => {
     if (!me) return;
+    if (me.visit) {
+      const orgId = me.active?.id ?? "";
+      if (!path.startsWith(`/o/${orgId}/`))
+        navigate(
+          me.visit.outline_id
+            ? `/o/${orgId}/outlines/${me.visit.outline_id}`
+            : `/o/${orgId}/documents/${me.visit.document_id ?? ""}`,
+          true,
+        );
+      return;
+    }
     if (path === "/" || path === "/sign-in") {
       const first = me.organisations[0];
       navigate(first ? `/o/${first.id}/books` : "/organisations/new", true);
@@ -45,8 +64,9 @@ export function App() {
   }, [me, path]);
 
   let screen: React.ReactNode;
-  if (session.isPending) screen = <p className="muted">{t.loading}</p>;
-  else if (!signedIn) screen = <SignIn />;
+  if (session.isPending || !checked)
+    screen = <p className="muted">{t.loading}</p>;
+  else if (!signedIn && !visit) screen = <SignIn />;
   else if (!me)
     screen = failed ? (
       <p className="error" role="alert">
@@ -57,7 +77,7 @@ export function App() {
     );
   else if (path === "/organisations/new")
     screen = <NewOrganisation onCreated={refresh} />;
-  else if (path.startsWith("/admin") && me.user.super_admin) {
+  else if (path.startsWith("/admin") && me.user?.super_admin) {
     const [, , tab = "organisations", id] = path.split("/");
     screen = (
       <Suspense fallback={<p className="muted">{t.loading}</p>}>
@@ -79,6 +99,7 @@ export function App() {
       match && organisation ? (
         <OrganisationShell
           me={me}
+          visitor={visit !== undefined}
           organisation={organisation}
           screen={match.screen}
           rest={match.rest}
@@ -95,8 +116,23 @@ export function App() {
       <header className="topbar">
         <strong className="brand">{t.appName}</strong>
         <div className="topbar-actions">
-          {me && <OrganisationPicker me={me} current={matchOrg(path)?.orgId} />}
-          {me?.user.super_admin && (
+          {visit && (
+            <a
+              className="link"
+              href={visit.return_url}
+              data-testid="back"
+              onClick={(e) => {
+                e.preventDefault();
+                void leaveVisit(visit.return_url, path);
+              }}
+            >
+              {fill(t.backTo, { host: new URL(visit.return_url).host })}
+            </a>
+          )}
+          {me && !visit && (
+            <OrganisationPicker me={me} current={matchOrg(path)?.orgId} />
+          )}
+          {me?.user?.super_admin && (
             <Link to="/admin/organisations" className="link">
               {t.backOffice}
             </Link>
@@ -157,4 +193,24 @@ function OrganisationPicker({
       <option value="">+ {t.newOrganisation}</option>
     </select>
   );
+}
+
+/**
+ * "Back" to the platform: the visit ends here (its cookie goes), and the
+ * platform hears which document it ran, when there is one.
+ */
+async function leaveVisit(returnUrl: string, path: string): Promise<void> {
+  await fetch("/page/leave-visit", {
+    method: "POST",
+    credentials: "same-origin",
+  }).catch(() => undefined);
+  const url = new URL(returnUrl);
+  const document = matchOrg(path);
+  if (
+    document &&
+    (document.screen === "documents" || document.screen === "review") &&
+    document.rest[0]
+  )
+    url.searchParams.set("engines_document", document.rest[0]);
+  location.href = url.toString();
 }

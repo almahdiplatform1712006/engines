@@ -7,6 +7,7 @@ import type { Queryable } from "../shared/db/pool.ts";
 import { newId } from "../shared/ids.ts";
 import type { Auth } from "./auth.ts";
 import { hashKey, type Caller } from "./keys.ts";
+import type { Visit } from "./visits.ts";
 
 export type Role = "owner" | "admin" | "member";
 
@@ -27,6 +28,8 @@ export interface PageSession {
   user: PageUser;
   /** The organisation the person is acting for, with their role in it. */
   active: { orgId: string; role: Role } | null;
+  /** Set when this is another platform's visitor (E-21), not a signed-in person. */
+  visit?: Visit;
 }
 
 /**
@@ -100,6 +103,15 @@ export async function sessionCaller(
   db: Queryable,
   session: PageSession,
 ): Promise<Caller | null> {
+  if (session.visit) {
+    // A visit acts through the key that made its link.
+    return {
+      orgId: session.visit.orgId,
+      apiKeyId: session.visit.apiKeyId,
+      userId: null,
+      visit: session.visit,
+    };
+  }
   if (!session.active) return null;
   const apiKeyId = await builtInKey(db, session.active.orgId);
   return { orgId: session.active.orgId, apiKeyId, userId: session.user.id };

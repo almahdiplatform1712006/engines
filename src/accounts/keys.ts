@@ -3,12 +3,15 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Queryable } from "../shared/db/pool.ts";
 import { newId } from "../shared/ids.ts";
+import type { Visit } from "./visits.ts";
 
 export interface Caller {
   orgId: string;
   apiKeyId: string;
   /** The person on Engines' page, when the call came from there. */
   userId: string | null;
+  /** Another platform's visitor on the page, limited to its outline or document. */
+  visit?: Visit;
 }
 
 export interface KeyView {

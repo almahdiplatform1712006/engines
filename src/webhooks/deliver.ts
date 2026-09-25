@@ -2,6 +2,9 @@
 // document's `webhook_url` when a job ends and when a review saves a revision,
 // signed per organisation. Failed deliveries retry with backoff through
 // pg-boss; every attempt is logged in `webhook_deliveries`.
+// What a delivery POSTs is the contract's shape (src/contract/misc.ts).
+import type { DocumentStatus } from "../contract/document.ts";
+import type { WebhookPayload } from "../contract/misc.ts";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { PgBoss } from "pg-boss";
@@ -19,16 +22,11 @@ const TIMEOUT_MS = 10_000;
 
 export interface WebhookJob {
   documentId: string;
-  status: string;
+  status: DocumentStatus;
   revision: number;
 }
 
-export interface WebhookPayload {
-  id: string;
-  object: "document";
-  status: string;
-  revision: number;
-}
+export type { WebhookPayload };
 
 export async function createWebhookQueue(
   boss: PgBoss,
