@@ -57,19 +57,11 @@ export async function createDocument(
   }
   if (request.webhook_url !== undefined)
     checkWebhookUrl(request.webhook_url, deps.webhooks);
-  const source = await resolveSource(deps, caller.orgId, request.source);
-  const pageCount = await countPages(deps.store, source);
-  if (pageCount > MAX_PAGES) {
-    throw new Refusal(
-      "too_large",
-      `Books can be up to ${String(MAX_PAGES)} pages; this one has ${String(pageCount)}.`,
-    );
-  }
-  const fileHash = await fingerprintOf(deps.store, source);
-  const warning =
-    fileHash === null
-      ? null
-      : await sameFileWarning(db, clock, caller.orgId, fileHash);
+  const { source, pageCount, fileHash, warning } = await examineBook(
+    deps,
+    caller.orgId,
+    request.source,
+  );
   const uploadIds =
     source.kind === "pdf"
       ? [source.upload_id]
@@ -115,8 +107,41 @@ export async function createDocument(
   return { id, object: "document", status, warning };
 }
 
+export interface Examined {
+  source: DocumentSource;
+  pageCount: number;
+  fileHash: string | null;
+  warning: Warning | null;
+}
+
+/**
+ * The checks on the book itself: its uploads are finished and the org's, it
+ * has at most 800 pages, and whether this exact file ran before. The page
+ * shows the result before a document is created (`POST /page/estimate`).
+ */
+export async function examineBook(
+  deps: Pick<CreateDeps, "db" | "store" | "clock">,
+  orgId: string,
+  request: CreateDocumentRequest["source"],
+): Promise<Examined> {
+  const source = await resolveSource(deps, orgId, request);
+  const pageCount = await countPages(deps.store, source);
+  if (pageCount > MAX_PAGES) {
+    throw new Refusal(
+      "too_large",
+      `Books can be up to ${String(MAX_PAGES)} pages; this one has ${String(pageCount)}.`,
+    );
+  }
+  const fileHash = await fingerprintOf(deps.store, source);
+  const warning =
+    fileHash === null
+      ? null
+      : await sameFileWarning(deps.db, deps.clock, orgId, fileHash);
+  return { source, pageCount, fileHash, warning };
+}
+
 async function resolveSource(
-  deps: CreateDeps,
+  deps: Pick<CreateDeps, "db" | "store" | "clock">,
   orgId: string,
   source: CreateDocumentRequest["source"],
 ): Promise<DocumentSource> {

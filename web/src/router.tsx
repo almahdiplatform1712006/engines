@@ -29,7 +29,7 @@ export function matchOrg(
   if (o !== "o" || !orgId) return null;
   return {
     orgId: safeDecode(orgId),
-    screen: screen ?? "keys",
+    screen: screen ?? "books",
     rest: rest.map(safeDecode),
   };
 }

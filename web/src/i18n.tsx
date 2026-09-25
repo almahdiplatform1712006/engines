@@ -55,6 +55,42 @@ const ar = {
   pageCredits: "صفحة",
   ledger: "السجل",
   kinds: { grant: "منحة", hold: "حجز", release: "تحرير", usage: "استخدام" },
+  books: "الكتب",
+  noBooks: "لا توجد كتب بعد.",
+  uploadBook: "رفع الكتاب",
+  bookPdf: "ملف PDF",
+  bookPhotos: "صور الصفحات",
+  upload: "رفع",
+  estimate:
+    "الكتاب {pages} صفحة، وسيستهلك {pages} رصيد صفحات. رصيدك {balance}.",
+  runAgain: "تشغيله مرة أخرى يُنشئ مهمة جديدة.",
+  startProcessing: "ابدأ المعالجة",
+  noCredits: "رصيدك لا يكفي لهذا الكتاب.",
+  tooLarge: "الكتاب أكبر من الحد المسموح (800 صفحة أو 500 ميغابايت).",
+  bookStatus: "حالة الكتاب",
+  statuses: {
+    queued: "في الانتظار",
+    rendering: "تجهيز الصفحات",
+    awaiting_offset: "بانتظار تأكيد أرقام الصفحات",
+    processing: "قراءة الصفحات",
+    completed: "اكتمل",
+    completed_with_errors: "اكتمل مع ملاحظات",
+    failed: "فشل",
+  },
+  pagesRead: "قُرئت {read} من {total} صفحة",
+  canClose:
+    "يمكنك إغلاق هذه الصفحة. ستظهر النتائج هنا ونرسل الـ webhook عند الانتهاء.",
+  questionsFound: "{n} سؤال",
+  chunksFound: "{n} مقطع شرح",
+  failuresFound: "{n} عنصر لم يُسلَّم (انظر المراجعة)",
+  openResults: "عرض النتائج",
+  download: "تنزيل",
+  offsetTitle: "أين تبدأ أرقام الصفحات المطبوعة؟",
+  offsetHelp: "تحقّق من الرقم المطبوع في الصورتين، وصحّحه إن لزم.",
+  printedPage: "الصفحة المطبوعة",
+  pdfPage: "صفحة الملف",
+  pdfPageN: "صفحة الملف {n}",
+  confirmOffset: "تأكيد",
   newBook: "كتاب جديد",
   stepType: "ماذا تريد من الكتاب؟",
   types: {
@@ -188,6 +224,43 @@ const en: Dictionary = {
   pageCredits: "pages",
   ledger: "Ledger",
   kinds: { grant: "Grant", hold: "Hold", release: "Release", usage: "Usage" },
+  books: "Books",
+  noBooks: "No books yet.",
+  uploadBook: "Upload the book",
+  bookPdf: "A PDF",
+  bookPhotos: "Photos of the pages",
+  upload: "Upload",
+  estimate:
+    "The book has {pages} pages and will use {pages} page credits. Your balance is {balance}.",
+  runAgain: "Running it again makes a new job.",
+  startProcessing: "Start processing",
+  noCredits: "Your balance doesn't cover this book.",
+  tooLarge: "The book is over the limit (800 pages or 500 MB).",
+  bookStatus: "Book status",
+  statuses: {
+    queued: "Queued",
+    rendering: "Preparing pages",
+    awaiting_offset: "Waiting for page numbers to be confirmed",
+    processing: "Reading pages",
+    completed: "Completed",
+    completed_with_errors: "Completed, with notes",
+    failed: "Failed",
+  },
+  pagesRead: "{read} of {total} pages read",
+  canClose:
+    "You can close this page. We'll show results here and send your webhook when done.",
+  questionsFound: "{n} questions",
+  chunksFound: "{n} explanation chunks",
+  failuresFound: "{n} items not delivered (see review)",
+  openResults: "Open results",
+  download: "Download",
+  offsetTitle: "Where do the printed page numbers start?",
+  offsetHelp:
+    "Check the printed number on both pages, and correct it if needed.",
+  printedPage: "Printed page",
+  pdfPage: "PDF page",
+  pdfPageN: "PDF page {n}",
+  confirmOffset: "Confirm",
   newBook: "New book",
   stepType: "What do you want from the book?",
   types: {
@@ -286,6 +359,12 @@ export function fill(
   return message.replace(/\{(\w+)\}/g, (_, name: string) =>
     String(values[name] ?? ""),
   );
+}
+
+/** A document status in words; one the page doesn't know yet shows as it is. */
+export function statusLabel(t: Dictionary, status: string): string {
+  const labels: Record<string, string | undefined> = t.statuses;
+  return labels[status] ?? status;
 }
 
 interface I18n {

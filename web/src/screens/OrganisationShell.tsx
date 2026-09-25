@@ -1,15 +1,18 @@
 import type { Me } from "../api.ts";
 import { useI18n } from "../i18n.tsx";
 import { Link } from "../router.tsx";
+import { Books } from "./Books.tsx";
+import { DocumentView } from "./DocumentView.tsx";
 import { Keys } from "./Keys.tsx";
 import { Members } from "./Members.tsx";
 import { NewBook } from "./NewBook.tsx";
 import { OutlineEditor } from "./OutlineEditor.tsx";
+import { UploadBook } from "./UploadBook.tsx";
 import { Usage } from "./Usage.tsx";
 
 export type Organisation = Me["organisations"][number];
 
-const TABS = ["new", "keys", "members", "usage"] as const;
+const TABS = ["books", "new", "keys", "members", "usage"] as const;
 
 export function OrganisationShell(props: {
   me: Me;
@@ -20,6 +23,7 @@ export function OrganisationShell(props: {
   const { t } = useI18n();
   const { organisation } = props;
   const labels: Record<(typeof TABS)[number], string> = {
+    books: t.books,
     new: t.newBook,
     keys: t.keys,
     members: t.members,
@@ -41,6 +45,27 @@ export function OrganisationShell(props: {
         />
       );
       break;
+    case "upload":
+      screen = (
+        <UploadBook
+          key={`${key}/${props.rest[0] ?? ""}`}
+          organisation={organisation}
+          outlineId={props.rest[0] ?? ""}
+        />
+      );
+      break;
+    case "documents":
+      screen = (
+        <DocumentView
+          key={`${key}/${props.rest[0] ?? ""}`}
+          organisation={organisation}
+          documentId={props.rest[0] ?? ""}
+        />
+      );
+      break;
+    case "keys":
+      screen = <Keys key={key} organisation={organisation} />;
+      break;
     case "members":
       screen = <Members key={key} organisation={organisation} />;
       break;
@@ -48,7 +73,7 @@ export function OrganisationShell(props: {
       screen = <Usage key={key} organisation={organisation} />;
       break;
     default:
-      screen = <Keys key={key} organisation={organisation} />;
+      screen = <Books key={key} organisation={organisation} />;
   }
   return (
     <div className="shell">

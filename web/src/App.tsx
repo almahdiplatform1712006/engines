@@ -34,7 +34,7 @@ export function App() {
     if (!me) return;
     if (path === "/" || path === "/sign-in") {
       const first = me.organisations[0];
-      navigate(first ? `/o/${first.id}/keys` : "/organisations/new", true);
+      navigate(first ? `/o/${first.id}/books` : "/organisations/new", true);
     }
   }, [me, path]);
 

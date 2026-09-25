@@ -5,7 +5,13 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { createApiKey, listKeys, revokeKey } from "../accounts/keys.ts";
 import { strongestRole, type PageSession } from "../accounts/sessions.ts";
-import type { Queryable } from "../shared/db/pool.ts";
+import { balance } from "../accounts/credits.ts";
+import { CreateDocumentRequest } from "../contract/document.ts";
+import { examineBook } from "../documents/create.ts";
+import { liveDocument } from "../documents/store.ts";
+import type { Clock } from "../shared/clock.ts";
+import type { Db } from "../shared/db/pool.ts";
+import type { BlobStore } from "../storage/store.ts";
 import { Refusal } from "../shared/refusal.ts";
 import { readBody, unauthorized } from "./errors.ts";
 import { readSession, type SessionDeps } from "./page-session.ts";
@@ -15,11 +21,20 @@ interface Env {
 }
 
 const CreateKeyRequest = z.object({ name: z.string().trim().min(1).max(100) });
+const EstimateRequest = CreateDocumentRequest.pick({ source: true });
+
+/** How long a redirected page image link lasts. */
+const PAGE_URL_SECONDS = 15 * 60;
 
 export function pageRoutes(
-  deps: SessionDeps & { db: Queryable; google: boolean },
+  deps: SessionDeps & {
+    db: Db;
+    store: BlobStore;
+    clock: Clock;
+    google: boolean;
+  },
 ): Hono<Env> {
-  const { db } = deps;
+  const { db, store } = deps;
   const page = new Hono<Env>();
 
   // Before sign-in: which ways in the page offers.
@@ -81,6 +96,64 @@ export function pageRoutes(
     const { name } = await readBody(c, CreateKeyRequest);
     const created = await createApiKey(db, orgId, name, c.var.session.user.id);
     return c.json({ id: created.id, name, key: created.key }, 201);
+  });
+
+  // Before a document is created: what the uploaded book is and costs.
+  page.post("/estimate", async (c) => {
+    const orgId = organisation(c.var.session);
+    const { source } = await readBody(c, EstimateRequest);
+    const book = await examineBook(deps, orgId, source);
+    return c.json({
+      pages: book.pageCount,
+      balance: await balance(db, orgId),
+      warning: book.warning,
+    });
+  });
+
+  page.get("/documents", async (c) => {
+    const orgId = organisation(c.var.session);
+    const { rows } = await db.query<{
+      id: string;
+      type: string;
+      status: string;
+      pages: number | null;
+      pages_read: number;
+      filename: string | null;
+      created_at: Date;
+    }>(
+      `SELECT d.id, d.type, d.status, d.page_count AS pages, d.created_at,
+         (SELECT count(*)::int FROM pages p WHERE p.document_id = d.id AND p.state <> 'pending') AS pages_read,
+         (SELECT u.filename FROM uploads u WHERE u.org_id = d.org_id AND u.document_id = d.id ORDER BY u.created_at, u.id LIMIT 1) AS filename
+       FROM documents d WHERE d.org_id = $1 AND d.expired_at IS NULL
+       ORDER BY d.created_at DESC, d.id LIMIT 200`,
+      [orgId],
+    );
+    return c.json({
+      object: "list",
+      data: rows.map(({ filename, created_at, ...row }) => ({
+        ...row,
+        title: filename?.replace(/\.[^.]+$/, "") ?? row.id,
+        created_at: created_at.toISOString(),
+      })),
+    });
+  });
+
+  // A page of a book, as the pipeline rendered it: thumbnails on the offset
+  // screen and page images in review load straight from here.
+  page.get("/documents/:id/pages/:page", async (c) => {
+    const orgId = organisation(c.var.session);
+    const row = await liveDocument(db, orgId, c.req.param("id"));
+    const pdfPage = Number(c.req.param("page"));
+    if (!Number.isSafeInteger(pdfPage) || pdfPage < 1)
+      throw new Refusal("not_found", "No such page.");
+    const { rows } = await db.query<{ image_key: string }>(
+      "SELECT image_key FROM pages WHERE document_id = $1 AND pdf_page = $2",
+      [row.id, pdfPage],
+    );
+    const key = rows[0]?.image_key;
+    if (!key) throw new Refusal("not_found", "No such page.");
+    c.header("cache-control", "private, max-age=300");
+    return c.redirect(await store.signedUrl(key, PAGE_URL_SECONDS), 302);
   });
 
   page.delete("/keys/:id", async (c) => {

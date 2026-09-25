@@ -21,7 +21,14 @@ export async function readSession(
   deps: SessionDeps,
   c: Context,
 ): Promise<PageSession | null> {
-  const session = await pageSession(deps.auth, deps.db, c.req.raw.headers);
+  // Links the page puts in <img> and <a download> can't send the header, so
+  // a read may name the organisation as `?org=` instead. Writes can't.
+  const session = await pageSession(
+    deps.auth,
+    deps.db,
+    c.req.raw.headers,
+    SAFE.has(c.req.method) ? (c.req.query("org") ?? null) : null,
+  );
   if (session && !SAFE.has(c.req.method)) {
     const origin = c.req.header("origin");
     if (!origin || !deps.origins.includes(origin)) {

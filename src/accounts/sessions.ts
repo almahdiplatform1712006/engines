@@ -38,6 +38,8 @@ export async function pageSession(
   auth: Auth,
   db: Queryable,
   headers: Headers,
+  /** The organisation named another way (an image or download link's `?org=`). */
+  named: string | null = null,
 ): Promise<PageSession | null> {
   const found = await auth.api.getSession({ headers });
   if (!found) return null;
@@ -53,6 +55,7 @@ export async function pageSession(
   };
   const orgId =
     headers.get(ORGANISATION_HEADER) ??
+    named ??
     found.session.activeOrganizationId ??
     (await firstOrganisation(db, user.id));
   if (!orgId) return { user, active: null };

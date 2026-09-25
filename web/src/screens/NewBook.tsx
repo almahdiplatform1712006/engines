@@ -5,17 +5,22 @@ import { useState } from "react";
 import { api } from "../api.ts";
 import { useI18n } from "../i18n.tsx";
 import { NumberInput } from "../NumberInput.tsx";
+import { plain } from "../errors.ts";
+import {
+  FileList,
+  FilePicker,
+  PHOTO_TYPES,
+  UploadProgressBar,
+  useUploads,
+} from "../files.tsx";
 import { navigate } from "../router.tsx";
-import { uploadFile, type UploadProgress } from "../upload.ts";
 import type { Organisation } from "./OrganisationShell.tsx";
 
 export type BookType = "questions" | "explanation" | "both";
 type SyllabusKind = "pdf" | "images" | "book_pages" | "manual";
 
-const PHOTO_TYPES = "image/jpeg,image/png,image/webp";
-
 export function NewBook({ organisation }: { organisation: Organisation }) {
-  const { t, number } = useI18n();
+  const { t } = useI18n();
   const entitled = organisation.entitlements.includes("explanation");
   const types: BookType[] = entitled
     ? ["questions", "explanation", "both"]
@@ -27,7 +32,7 @@ export function NewBook({ organisation }: { organisation: Organisation }) {
     from: number | null;
     to: number | null;
   }>({ from: null, to: null });
-  const [progress, setProgress] = useState<UploadProgress | null>(null);
+  const { progress, uploadAll } = useUploads(organisation.id);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -42,17 +47,7 @@ export function NewBook({ organisation }: { organisation: Organisation }) {
     setError(null);
     try {
       const orgId = organisation.id;
-      const ids: string[] = [];
-      const total = files.reduce((sum, f) => sum + f.size, 0);
-      let before = 0;
-      for (const file of kind === "manual" ? [] : files) {
-        ids.push(
-          await uploadFile(file, orgId, (p) => {
-            setProgress({ sent: before + p.sent, total });
-          }),
-        );
-        before += file.size;
-      }
+      const ids = kind === "manual" ? [] : await uploadAll(files);
       const source =
         kind === "manual"
           ? { type: "manual", nodes: [{ name: t.firstNode }] }
@@ -74,17 +69,10 @@ export function NewBook({ organisation }: { organisation: Organisation }) {
       const book = kind === "book_pages" ? `&book=${ids[0] ?? ""}` : "";
       navigate(`/o/${orgId}/outlines/${outline.id}?type=${type}${book}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t.error);
+      setError(plain(e, t));
       setBusy(false);
     }
   }
-
-  const move = (i: number, by: number) => {
-    const next = [...files];
-    const [file] = next.splice(i, 1);
-    if (file) next.splice(i + by, 0, file);
-    setFiles(next);
-  };
 
   return (
     <section className="card">
@@ -142,50 +130,7 @@ export function NewBook({ organisation }: { organisation: Organisation }) {
           }}
         />
       )}
-      {files.length > 0 && (
-        <ol className="list files">
-          {files.map((file, i) => (
-            <li key={`${file.name}-${String(i)}`}>
-              <span dir="auto">{file.name}</span>
-              {kind === "images" && (
-                <span className="row">
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={i === 0}
-                    aria-label={t.moveUp}
-                    onClick={() => {
-                      move(i, -1);
-                    }}
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={i === files.length - 1}
-                    aria-label={t.moveDown}
-                    onClick={() => {
-                      move(i, 1);
-                    }}
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    className="danger"
-                    onClick={() => {
-                      setFiles(files.filter((_, j) => j !== i));
-                    }}
-                  >
-                    {t.remove}
-                  </button>
-                </span>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
+      <FileList files={files} reorder={kind === "images"} onChange={setFiles} />
       {kind === "book_pages" && (
         <div className="row">
           <label className="inline">
@@ -211,18 +156,7 @@ export function NewBook({ organisation }: { organisation: Organisation }) {
         </div>
       )}
 
-      {progress && busy && (
-        <div className="progress-line" role="status">
-          <progress value={progress.sent} max={progress.total} />
-          <span className="muted small">
-            {t.uploading}{" "}
-            {number(
-              Math.floor((100 * progress.sent) / Math.max(progress.total, 1)),
-            )}
-            %
-          </span>
-        </div>
-      )}
+      {busy && <UploadProgressBar progress={progress} />}
       {error && (
         <p className="error" role="alert">
           {error}
@@ -236,46 +170,5 @@ export function NewBook({ organisation }: { organisation: Organisation }) {
         {t.start}
       </button>
     </section>
-  );
-}
-
-/** A file input that also takes files dropped on it. */
-export function FilePicker(props: {
-  multiple: boolean;
-  accept: string;
-  label: string;
-  onFiles: (files: File[]) => void;
-}) {
-  const { t } = useI18n();
-  const [over, setOver] = useState(false);
-  return (
-    <label
-      className={over ? "dropzone over" : "dropzone"}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragLeave={() => {
-        setOver(false);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        setOver(false);
-        props.onFiles([...e.dataTransfer.files]);
-      }}
-    >
-      <span className="button-like">{props.label}</span>
-      <span className="muted small">{t.dropHere}</span>
-      <input
-        type="file"
-        className="visually-hidden"
-        multiple={props.multiple}
-        accept={props.accept}
-        onChange={(e) => {
-          props.onFiles([...(e.target.files ?? [])]);
-          e.target.value = "";
-        }}
-      />
-    </label>
   );
 }

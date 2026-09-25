@@ -24,7 +24,7 @@ Better Auth 1.7.6 (the pinned version) has no API-key plugin in its core package
   - When the header is sent, it wins; a bad key is `401` and never falls back to the cookie.
   - The page acts through a **built-in key** per organisation: an `api_keys` row with `built_in = true` whose secret is thrown away when it's made, so nobody can send it.
   - The page's documents therefore share one concurrency cap, one queue limit and one idempotency space per organisation, like any other key's. The built-in key is never listed, revoked or accepted as a Bearer key.
-- **Which organisation.** The page keeps the organisation in its URL (`/o/<org_id>/…`) and names it on every call (`Engines-Organisation` header). It is always checked against `members`. Otherwise it falls back to the session's active organisation, then the person's first.
+- **Which organisation.** The page keeps the organisation in its URL (`/o/<org_id>/…`) and names it on every call (`Engines-Organisation` header). Image and download links can't send a header, so a read (`GET`) may name it as `?org=` instead. It is always checked against `members`. Otherwise it falls back to the session's active organisation, then the person's first.
   - Better Auth's active organisation is per session, so two tabs would otherwise move each other.
   - Naming an organisation you aren't in acts for none: `401` on `/v1/`, and nothing on the page.
 - **CSRF.** Cookies go along on any request, so a state-changing request that carries a sign-in cookie must have an `Origin` of `PUBLIC_URL` or `AUTH_TRUSTED_ORIGINS`, else `403`. A missing `Origin` is refused too. Better Auth does the same on its own routes, and cookies are `SameSite=Lax`.

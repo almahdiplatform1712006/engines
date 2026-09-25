@@ -85,6 +85,8 @@ export function createApp(deps: AppDeps): Hono {
     "/page",
     pageRoutes({
       ...session,
+      store,
+      clock,
       google: auth.options.socialProviders !== undefined,
     }),
   );

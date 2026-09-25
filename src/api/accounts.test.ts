@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { getMigrations } from "better-auth/db/migration";
 import { startHarness, type Harness } from "../../test/harness.ts";
+import { makePdf } from "../../test/pdf.ts";
 import { scriptedReader } from "../reading/scripted.ts";
 import { authOptions } from "../accounts/auth.ts";
 
@@ -289,4 +290,64 @@ test("the accounts migration matches Better Auth's schema", async () => {
     },
     { toBeCreated: [], toBeAdded: [] },
   );
+});
+
+describe("the page's own routes for books", () => {
+  test("estimate, the books list and page images stay inside the organisation", async () => {
+    const book = await h.runBook({
+      pdf: makePdf(["one", "two"]),
+      nodes: [{ name: "L", printed_pages: { from: 1, to: 2 } }],
+    });
+
+    // The harness organisation's books, seen by a member of another one.
+    const other = await signUp("outsider@example.com");
+    await newOrganisation(other, "Outsiders");
+    const list = await other.json<{ data: unknown[] }>(
+      "GET",
+      "/page/documents",
+    );
+    assert.deepEqual(list.data, []);
+    assert.equal(
+      (await other.send("GET", `/page/documents/${book.id}/pages/1`)).status,
+      404,
+    );
+
+    // A member of the harness organisation sees them, by header or ?org=.
+    const member = await signUp("insider@example.com");
+    const userId = (
+      await h.db.query<{ id: string }>(
+        "SELECT id FROM users WHERE email = $1",
+        ["insider@example.com"],
+      )
+    ).rows[0]?.id;
+    await h.db.query(
+      "INSERT INTO members (id, org_id, user_id, role, created_at) VALUES ('mem_x', $1, $2, 'member', now())",
+      [h.orgId, userId],
+    );
+    const image = await member.send(
+      "GET",
+      `/page/documents/${book.id}/pages/1?org=${h.orgId}`,
+    );
+    assert.equal(image.status, 302);
+    assert.match(image.headers.get("location") ?? "", /local-storage/);
+    member.actFor(h.orgId);
+    const books = await member.json<{
+      data: { id: string; title: string; status: string }[];
+    }>("GET", "/page/documents");
+    assert.ok(books.data.some((d) => d.id === book.id && d.title === "book"));
+
+    const pdf = makePdf(["a", "b", "c"]);
+    const uploadId = await h.upload(pdf, "application/pdf");
+    const estimate = await member.json<{
+      pages: number;
+      balance: number;
+      warning: unknown;
+    }>("POST", "/page/estimate", { source: { upload_id: uploadId } });
+    assert.equal(estimate.pages, 3);
+    assert.ok(estimate.balance > 0);
+    const foreign = await other.send("POST", "/page/estimate", {
+      source: { upload_id: uploadId },
+    });
+    assert.equal(foreign.status, 404);
+  });
 });
