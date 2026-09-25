@@ -70,6 +70,33 @@ describe("placement (E-05)", () => {
     );
   });
 
+  test("a page whose printed number contradicts the offset is held as offset_break", () => {
+    const result = run({
+      1: page("1", [mcq("1", "a")]),
+      2: page("7", [mcq("2", "b")]),
+      3: page("3", [mcq("3", "c")]),
+    });
+    assert.deepEqual(
+      result.questions.map((q) => q.number),
+      ["1", "3"],
+    );
+    assert.deepEqual(
+      result.failures.map((f) => [f.reason, f.locator.pdf_page]),
+      [["offset_break", 2]],
+    );
+  });
+
+  test("placement goes through the offset", () => {
+    const result = run(
+      { 7: page("5", [mcq("1", "a")]) },
+      { segments: [{ printed_from: 1, pdf_from: 3, confirmed: true }] },
+    );
+    assert.deepEqual(
+      result.questions.map((q) => [q.node_id, q.locator]),
+      [["unit", { pdf_page: 7, printed_page: 5 }]],
+    );
+  });
+
   test("blocks that are neither are counted, not dropped", () => {
     const result = run({
       1: page("1", [modelBlock({ kind: "neither" }), mcq("1", "a")]),

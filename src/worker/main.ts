@@ -25,8 +25,11 @@ const readers = new Map<Provider, PageReader>();
 const reader = (provider: Provider): PageReader => {
   let existing = readers.get(provider);
   if (!existing) {
-    const { model, name } = languageModel(ai, provider, "main");
-    existing = createModelReader({ model, modelName: name, record });
+    existing = createModelReader({
+      main: languageModel(ai, provider, "main"),
+      cheap: languageModel(ai, provider, "cheap"),
+      record,
+    });
     readers.set(provider, existing);
   }
   return existing;

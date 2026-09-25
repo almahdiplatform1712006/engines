@@ -125,6 +125,8 @@ export const Document = z.object({
   progress: z.object({ pages_total: z.int().nullable(), pages_read: z.int() }),
   usage: z.object({ pages: z.int() }),
   offset: z.array(OffsetSegment),
+  /** Share of the quick pass's page numbers that agree with the proposed offset (0–1). */
+  offset_agreement: z.number().nullable(),
   stimuli: z.array(Stimulus),
   questions: z.array(Question),
   explanation: z.array(ExplanationChunk).optional(),
@@ -141,6 +143,16 @@ export const CreateDocumentRequest = z.object({
     z.object({ upload_ids: z.array(z.string()).min(1).max(800) }),
   ]),
   language: z.enum(["ar", "en"]).optional(),
+  /** "auto" pre-approves the proposed printed → PDF mapping when agreement is high. */
+  offset: z.enum(["auto", "confirm"]).optional(),
   webhook_url: z.url({ protocol: /^https?$/ }).optional(),
 });
 export type CreateDocumentRequest = z.infer<typeof CreateDocumentRequest>;
+
+export const ConfirmOffsetRequest = z.object({
+  /** Corrected segments. Omit to accept the proposed ones. */
+  segments: z
+    .array(z.object({ printed_from: z.int().min(1), pdf_from: z.int().min(1) }))
+    .min(1)
+    .optional(),
+});

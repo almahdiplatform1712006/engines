@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import type { PgBoss } from "pg-boss";
 import { authenticate, type Caller } from "../accounts/keys.ts";
-import { CreateDocumentRequest } from "../contract/document.ts";
+import {
+  ConfirmOffsetRequest,
+  CreateDocumentRequest,
+} from "../contract/document.ts";
 import {
   CreateOutlineRequest,
   ReplaceOutlineRequest,
@@ -16,6 +19,7 @@ import {
   replaceOutline,
 } from "../outline/store.ts";
 import { normaliseTree } from "../outline/tree.ts";
+import { confirmOffset } from "../pipeline/pipeline.ts";
 import type { Clock } from "../shared/clock.ts";
 import type { Db } from "../shared/db/pool.ts";
 import { Refusal } from "../shared/refusal.ts";
@@ -109,6 +113,20 @@ export function createApp(deps: AppDeps): Hono {
   v1.post("/documents", async (c) => {
     const body = await readBody(c, CreateDocumentRequest);
     return c.json(await createDocument(deps, c.var.caller, body), 202);
+  });
+
+  v1.post("/documents/:id/offset", async (c) => {
+    const body = await readBody(c, ConfirmOffsetRequest);
+    await confirmOffset(
+      deps,
+      c.var.caller.orgId,
+      c.req.param("id"),
+      body.segments,
+    );
+    const row = await getDocumentRow(db, c.var.caller.orgId, c.req.param("id"));
+    if (!row)
+      throw new Refusal("not_found", `No document ${c.req.param("id")}.`);
+    return c.json(await documentView(db, store, row));
   });
 
   v1.get("/documents/:id", async (c) => {

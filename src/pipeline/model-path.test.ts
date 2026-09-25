@@ -17,8 +17,7 @@ before(async () => {
   h = await startHarness({
     reader: () =>
       createModelReader({
-        model,
-        modelName: "mock/vision",
+        main: { model, name: "mock/vision" },
         record: (call) => {
           if (!h) throw new Error("harness not started");
           return recordCallsIn(h.db)(call);
@@ -54,6 +53,13 @@ test("pages go through the model adapter, and every call is logged", async () =>
     })
   ).json()) as { id: string };
 
+  // The mock model reads no printed numbers, so the uploader states the offset.
+  await h.waitFor(created.id, ["awaiting_offset"]);
+  const confirmed = await h.call("POST", `/v1/documents/${created.id}/offset`, {
+    segments: [{ printed_from: 1, pdf_from: 1 }],
+  });
+  assert.equal(confirmed.status, 200);
+
   const doc = (await h.waitFor(created.id, [
     "completed",
     "completed_with_errors",
@@ -78,8 +84,10 @@ test("pages go through the model adapter, and every call is logged", async () =>
     "SELECT purpose, model, finish_reason, ok FROM model_calls WHERE document_id = $1",
     [created.id],
   );
-  assert.equal(calls.rows.length, 3);
-  for (const call of calls.rows) {
+  const reads = calls.rows.filter((c) => c.purpose === "read_page");
+  assert.equal(reads.length, 3);
+  assert.equal(calls.rows.filter((c) => c.purpose === "read_number").length, 3);
+  for (const call of reads) {
     assert.deepEqual(call, {
       purpose: "read_page",
       model: "mock/vision",

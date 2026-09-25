@@ -16,6 +16,11 @@ export interface CallContext {
 }
 
 export interface PageReader {
+  /** Step 1b: only the printed page number, with the cheap model. Raw, as printed. */
+  readPrintedNumber(
+    image: PageImage,
+    context: CallContext,
+  ): Promise<string | null>;
   /** Step 2: every block on one page, one image per call. */
   readPage(image: PageImage, context: CallContext): Promise<PageReading>;
 }

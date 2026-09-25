@@ -63,7 +63,9 @@ The pair re-read (E-09) passes the two flagged halves as anchors by id and gets 
 
 ### Offset segments
 
-Segment _i_ maps printed pages from its `printed_from` up to just before the next segment's `printed_from`. PDF pages no segment covers (front matter, an unnumbered plate) have no printed number. Segments whose printed numbers don't rise with their PDF pages (a restart at 1) are refused at confirmation, since they would map one printed page twice.
+Segment _i_ maps printed pages from its `printed_from` up to just before the next segment starts, counted in printed pages and in PDF pages both (a scan missing a page shifts the mapping back, and two segments must never claim one PDF page). PDF pages no segment covers (front matter, an unnumbered plate) have no printed number. Segments whose printed numbers don't rise with their PDF pages (a restart at 1) are refused at confirmation, since they would map one printed page twice.
+
+The fit takes runs of consecutive samples with the same shift; a run of one is a misread and is ignored. After the full read, a page whose printed number contradicts the confirmed segments is held as `offset_break`. So is an unnumbered page next to such a page. An unnumbered page between agreeing pages, a page with nothing but `neither` blocks, and a book with no page numbers at all are not breaks.
 
 ### Testing seams
 

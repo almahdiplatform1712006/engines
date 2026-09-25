@@ -2,9 +2,9 @@
 //
 // A book's mapping is one or more segments in PDF order. Segment i maps printed
 // page p to PDF page p + (pdf_from - printed_from), for printed pages from its
-// `printed_from` up to just before the next segment's `printed_from`. PDF pages no
-// segment covers (front matter, an unnumbered plate between segments) have no
-// printed number.
+// `printed_from` up to just before the next segment starts (in printed and in PDF
+// pages). PDF pages no segment covers (front matter, an unnumbered plate between
+// segments) have no printed number.
 import { z } from "zod";
 
 export const OffsetSegment = z.object({
@@ -30,10 +30,15 @@ function spans(segments: readonly OffsetSegment[]): Span[] {
   const sorted = [...segments].sort((a, b) => a.pdf_from - b.pdf_from);
   return sorted.map((segment, i) => {
     const next = sorted[i + 1];
+    const shift = segment.pdf_from - segment.printed_from;
     return {
       printedFrom: segment.printed_from,
-      printedTo: next ? next.printed_from - 1 : Number.POSITIVE_INFINITY,
-      shift: segment.pdf_from - segment.printed_from,
+      // Up to the page before the next segment starts, in printed numbers and in
+      // PDF pages both: a scan missing a page shifts back, and the two must not overlap.
+      printedTo: next
+        ? Math.min(next.printed_from - 1, next.pdf_from - 1 - shift)
+        : Number.POSITIVE_INFINITY,
+      shift,
     };
   });
 }
@@ -82,13 +87,6 @@ export function segmentProblems(segments: readonly OffsetSegment[]): string[] {
     } else if (segment.printed_from <= before.printed_from) {
       problems.push(
         `Printed page ${String(segment.printed_from)} on PDF page ${String(segment.pdf_from)} does not come after printed page ${String(before.printed_from)}.`,
-      );
-    } else if (
-      segment.pdf_from - segment.printed_from <
-      before.pdf_from - before.printed_from
-    ) {
-      problems.push(
-        `The segment at PDF page ${String(segment.pdf_from)} would put printed pages before the previous segment's.`,
       );
     }
   }

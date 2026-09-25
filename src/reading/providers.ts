@@ -2,13 +2,8 @@
 // provider setting per API key). The model name is always config.
 import { createVertex } from "@ai-sdk/google-vertex";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import type { LanguageModel } from "ai";
 import type { AiConfig, Provider } from "../shared/config.ts";
-
-export interface NamedModel {
-  model: LanguageModel;
-  name: string;
-}
+import type { NamedModel } from "./model.ts";
 
 export type Tier = "main" | "cheap";
 

@@ -5,7 +5,7 @@ import type {
   DocumentType,
 } from "../contract/document.ts";
 import type { StoredImage, ResultBody } from "../assembly/result.ts";
-import { IDENTITY, type OffsetSegment } from "../offset/segments.ts";
+import type { OffsetSegment } from "../offset/segments.ts";
 import type { Queryable } from "../shared/db/pool.ts";
 import type { BlobStore } from "../storage/store.ts";
 
@@ -26,6 +26,8 @@ export interface DocumentRow {
   page_count: number | null;
   pages_pending: number;
   offset_segments: OffsetSegment[] | null;
+  offset_mode: "confirm" | "auto";
+  offset_agreement: number | null;
   revision: number;
   error: string | null;
   created_at: Date;
@@ -106,7 +108,8 @@ export async function documentView(
       pages_read: progress.rows[0]?.read ?? 0,
     },
     usage: { pages: body ? (row.page_count ?? 0) : 0 },
-    offset: row.offset_segments ?? [...IDENTITY],
+    offset: row.offset_segments ?? [],
+    offset_agreement: row.offset_agreement,
     stimuli: await Promise.all(
       (body?.stimuli ?? []).map(async (s) => ({
         ...s,

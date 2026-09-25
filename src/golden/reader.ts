@@ -1,5 +1,9 @@
-// The page reader the golden tools run. The model reader arrives with the reading
-// tickets (E-05/E-06) and registers here; until then only the stub exists.
+// The page reader the golden tools run: the stub, or Engines' own model reader
+// (`GOLDEN_READER=model`, using AI_MODEL on OpenRouter).
+import { createModelReader } from "../reading/model.ts";
+import { languageModel } from "../reading/providers.ts";
+import { readAiConfig } from "../shared/config.ts";
+import { goldenReader } from "./engine-reader.ts";
 import { emptyPage, type PageContent, type Usage } from "./truth.ts";
 
 export interface PageImage {
@@ -32,18 +36,32 @@ export const stubReader: PageReader = {
   },
 };
 
-const readers: Record<string, PageReader> = { stub: stubReader };
+const readers: Record<
+  string,
+  (env: Record<string, string | undefined>) => PageReader
+> = {
+  stub: () => stubReader,
+  model: (env) => {
+    const ai = readAiConfig(env);
+    return goldenReader(`model:${ai.model ?? "?"}`, (record) =>
+      createModelReader({
+        main: languageModel(ai, "openrouter", "main"),
+        record,
+      }),
+    );
+  },
+};
 
 /** The reader named by `GOLDEN_READER`, defaulting to the stub. */
 export function selectReader(
   env: Record<string, string | undefined>,
 ): PageReader {
   const name = env["GOLDEN_READER"] ?? "stub";
-  const reader = readers[name];
-  if (reader === undefined) {
+  const make = readers[name];
+  if (make === undefined) {
     throw new Error(
       `GOLDEN_READER="${name}" is not a page reader. Available: ${Object.keys(readers).join(", ")}`,
     );
   }
-  return reader;
+  return make(env);
 }

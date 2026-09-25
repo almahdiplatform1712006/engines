@@ -1,8 +1,14 @@
 // Builds small, valid PDFs for tests: each page shows a line of text.
-export function makePdf(pages: readonly string[]): Buffer {
+export function makePdf(
+  pages: readonly string[],
+  options: { labels?: string } = {},
+): Buffer {
   const objects: string[] = [];
   const pageIds = pages.map((_, i) => 4 + i * 2);
-  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  // `labels` is a PageLabels number tree, e.g. "0 << /S /r >> 4 << /S /D >>".
+  objects[1] = options.labels
+    ? `<< /Type /Catalog /Pages 2 0 R /PageLabels << /Nums [${options.labels}] >> >>`
+    : "<< /Type /Catalog /Pages 2 0 R >>";
   objects[2] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${String(id)} 0 R`).join(" ")}] /Count ${String(pages.length)} >>`;
   objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
   pages.forEach((text, i) => {

@@ -1,6 +1,8 @@
 // Instructions sent with each page image. Kept apart from the call code so the
 // golden-set trial can compare prompt changes.
 
+export const READ_NUMBER = `This is one page of a book, as an image. Return the page number printed on it (usually in a corner or at the bottom centre), exactly as printed, including Arabic-Indic digits. Return null if there is no printed page number. Ignore chapter, lesson, question and figure numbers.`;
+
 export const READ_PAGE = `You are reading one page of a school book, as an image. The book may be Arabic (right-to-left), English, or both.
 
 Return every block on the page, in reading order, labelled:

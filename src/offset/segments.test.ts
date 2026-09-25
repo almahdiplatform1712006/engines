@@ -33,6 +33,16 @@ test("a shift after an unnumbered plate", () => {
   assert.equal(printedToPdf(book, 300), 305);
 });
 
+test("a page missing from the scan shifts the mapping back", () => {
+  const missing: OffsetSegment[] = [
+    { printed_from: 1, pdf_from: 3, confirmed: true },
+    { printed_from: 30, pdf_from: 31, confirmed: true },
+  ];
+  assert.equal(pdfToPrinted(missing, 30), 28);
+  assert.equal(pdfToPrinted(missing, 31), 30, "printed 29 was never scanned");
+  assert.equal(printedToPdf(missing, 29), null);
+});
+
 test("a restart in numbering is ambiguous", () => {
   assert.equal(segmentProblems(book).length, 0);
   assert.equal(

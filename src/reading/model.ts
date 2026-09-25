@@ -8,9 +8,9 @@ import {
   type UserContent,
   type ProviderMetadata,
 } from "ai";
-import type { z } from "zod";
+import { z } from "zod";
 import { ModelPage, toPageReading } from "./blocks.ts";
-import { READ_PAGE } from "./prompts.ts";
+import { READ_NUMBER, READ_PAGE } from "./prompts.ts";
 import type {
   CallContext,
   ModelCall,
@@ -18,11 +18,17 @@ import type {
   RecordCall,
 } from "./reader.ts";
 
-export interface ModelReaderOptions {
-  /** The model that reads pages. */
+/** A model and its name for the log. The name itself comes from config, never a call site. */
+export interface NamedModel {
   model: LanguageModel;
-  /** Its name, for the log. The name itself comes from config (never a call site). */
-  modelName: string;
+  name: string;
+}
+
+export interface ModelReaderOptions {
+  /** Reads pages. */
+  main: NamedModel;
+  /** Reads printed page numbers in the quick pass. Defaults to `main`. */
+  cheap?: NamedModel;
   record: RecordCall;
   /**
    * Output-token limits to try in turn. A call that stops on `length` is tried
@@ -33,6 +39,13 @@ export interface ModelReaderOptions {
 
 const DEFAULT_STEPS = [16_000, 32_000] as const;
 
+const PrintedNumber = z.object({
+  printed_page: z
+    .string()
+    .nullable()
+    .describe("The printed page number exactly as printed, or null"),
+});
+
 export class TruncatedOutputError extends Error {
   override name = "TruncatedOutputError";
 }
@@ -40,7 +53,10 @@ export class TruncatedOutputError extends Error {
 export function createModelReader(options: ModelReaderOptions): PageReader {
   const steps = options.outputTokenSteps ?? DEFAULT_STEPS;
 
+  const cheap = options.cheap ?? options.main;
+
   async function call<S extends z.ZodType>(
+    named: NamedModel,
     purpose: ModelCall["purpose"],
     pdfPage: number | null,
     context: CallContext,
@@ -53,11 +69,11 @@ export function createModelReader(options: ModelReaderOptions): PageReader {
         context,
         purpose,
         pdfPage,
-        model: options.modelName,
+        model: named.name,
       };
       try {
         const result = await generateText({
-          model: options.model,
+          model: named.model,
           output: Output.object({ schema }),
           instructions,
           messages: [{ role: "user", content }],
@@ -105,8 +121,21 @@ export function createModelReader(options: ModelReaderOptions): PageReader {
   }
 
   return {
+    async readPrintedNumber(image, context) {
+      const { printed_page } = await call(
+        cheap,
+        "read_number",
+        image.pdfPage,
+        context,
+        PrintedNumber,
+        READ_NUMBER,
+        [{ type: "image", image: image.bytes, mediaType: image.mediaType }],
+      );
+      return printed_page;
+    },
     async readPage(image, context) {
       const page = await call(
+        options.main,
         "read_page",
         image.pdfPage,
         context,

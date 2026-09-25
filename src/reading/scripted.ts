@@ -8,12 +8,17 @@ export interface Script {
   pages: Record<number, ModelPage>;
   /** PDF pages whose read throws this many times before succeeding (Infinity: always). */
   failures?: Record<number, number>;
+  /**
+   * What the quick pass reads as each page's number. Defaults to the page's
+   * `printed_page`; set a page here to make the cheap read disagree.
+   */
+  numbers?: Record<number, string | null>;
   record?: RecordCall;
 }
 
 export function scriptedReader(
   script: Script,
-): PageReader & { reads: number[] } {
+): PageReader & { reads: number[]; numberReads: number[] } {
   const failuresLeft = new Map(
     Object.entries(script.failures ?? {}).map(([page, count]) => [
       Number(page),
@@ -21,8 +26,19 @@ export function scriptedReader(
     ]),
   );
   const reads: number[] = [];
+  const numberReads: number[] = [];
   return {
     reads,
+    numberReads,
+    readPrintedNumber(image) {
+      numberReads.push(image.pdfPage);
+      const number = script.numbers?.[image.pdfPage];
+      return Promise.resolve(
+        number === undefined
+          ? (script.pages[image.pdfPage]?.printed_page ?? null)
+          : number,
+      );
+    },
     async readPage(image, context) {
       reads.push(image.pdfPage);
       const left = failuresLeft.get(image.pdfPage) ?? 0;

@@ -3,6 +3,7 @@
 // a model (hard rule 4).
 import type { DocumentType } from "../contract/document.ts";
 import type { OutlineNode } from "../contract/outline.ts";
+import { checkPages } from "../offset/fit.ts";
 import { pdfToPrinted, type OffsetSegment } from "../offset/segments.ts";
 import type { Block, PageReading } from "../reading/blocks.ts";
 import type { ResultBody, StoredQuestion } from "./result.ts";
@@ -47,9 +48,28 @@ export function assemble(input: AssemblyInput): ResultBody {
     });
   }
 
+  // Step 3: pages whose printed number contradicts the confirmed offset are
+  // held, not placed.
+  const breaks = new Map(
+    checkPages(input.segments, input.pages).map((b) => [b.pdf_page, b]),
+  );
+
   for (const page of [...input.pages].sort((a, b) => a.pdf_page - b.pdf_page)) {
     const printed = pdfToPrinted(input.segments, page.pdf_page);
     const locator = { pdf_page: page.pdf_page, printed_page: printed };
+    const offsetBreak = breaks.get(page.pdf_page);
+    // A page with nothing to deliver loses nothing, so it is no break.
+    if (offsetBreak && page.blocks.some((b) => b.kind !== "neither")) {
+      result.failures.push({
+        reason: "offset_break",
+        locator,
+        detail:
+          offsetBreak.read === null
+            ? `no printed number read; expected ${String(offsetBreak.expected)}`
+            : `printed ${String(offsetBreak.read)} read; the offset expects ${String(offsetBreak.expected)}`,
+      });
+      continue;
+    }
     const nodes = printed === null ? [] : index.deepest(printed);
     const node = nodes[0];
     const unplaced: Block[] = [];

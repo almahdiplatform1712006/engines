@@ -70,6 +70,20 @@ describe("the tracer bullet", () => {
     );
     assert.equal(created.object, "document");
 
+    // The quick pass read the printed numbers and proposes printed = PDF page.
+    const awaiting = (await h.waitFor(created.id, [
+      "awaiting_offset",
+    ])) as unknown as Document;
+    assert.deepEqual(
+      awaiting.offset.map((s) => [s.printed_from, s.pdf_from, s.confirmed]),
+      [[1, 1, false]],
+    );
+    assert.deepEqual(reader.reads, [], "the full read waits for the offset");
+    await json(
+      await h.call("POST", `/v1/documents/${created.id}/offset`, {}),
+      200,
+    );
+
     const doc = (await h.waitFor(created.id, [
       "completed",
       "completed_with_errors",

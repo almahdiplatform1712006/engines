@@ -18,8 +18,7 @@ function reader(replies: Parameters<typeof mockModel>[0]) {
     calls,
     model,
     reader: createModelReader({
-      model,
-      modelName: "test/model",
+      main: { model, name: "test/model" },
       record: (call) => {
         calls.push(call);
         return Promise.resolve();

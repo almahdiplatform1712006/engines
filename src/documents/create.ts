@@ -56,8 +56,8 @@ export async function createDocument(
   const status = await db.transaction(async (tx) => {
     await tx.query(
       `INSERT INTO documents
-         (id, org_id, api_key_id, outline_id, type, language, status, source, webhook_url, created_at, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, $9, $10)`,
+         (id, org_id, api_key_id, outline_id, type, language, status, source, webhook_url, created_at, expires_at, offset_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, $9, $10, $11)`,
       [
         id,
         caller.orgId,
@@ -69,6 +69,7 @@ export async function createDocument(
         request.webhook_url ?? null,
         now,
         addDays(now, DOCUMENT_TTL_DAYS),
+        request.offset ?? "confirm",
       ],
     );
     await claimUploads(tx, id, uploadIds);

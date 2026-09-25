@@ -13,7 +13,20 @@ import { join } from "node:path";
 import type { PgBoss } from "pg-boss";
 import { assemble, type FailedPage } from "../assembly/assemble.ts";
 import { loadDocument, type DocumentRow } from "../documents/store.ts";
-import { IDENTITY } from "../offset/segments.ts";
+import {
+  autoApprovable,
+  fitSegments,
+  samplePages,
+  type Fit,
+} from "../offset/fit.ts";
+import {
+  IDENTITY,
+  segmentProblems,
+  type OffsetSegment,
+} from "../offset/segments.ts";
+import { pageLabels } from "../render/labels.ts";
+import { Refusal } from "../shared/refusal.ts";
+import { parsePrintedNumber } from "../shared/text.ts";
 import { getOutline } from "../outline/store.ts";
 import type { PageReading } from "../reading/blocks.ts";
 import type { PageReader } from "../reading/reader.ts";
@@ -198,6 +211,7 @@ export async function registerPipeline(
 /**
  * Step 1: one PNG per page, stored and reused by every later step. Resumable: a
  * retry skips pages already rendered, so a crash never renders a book twice.
+ * Then step 1b, the quick pass, which proposes the offset.
  */
 async function render(deps: PipelineDeps, documentId: string): Promise<void> {
   const doc = await loadDocument(deps.db, documentId);
@@ -213,6 +227,7 @@ async function render(deps: PipelineDeps, documentId: string): Promise<void> {
   );
   const addPage = async (
     pdfPage: number,
+    label: string | null,
     make: () => Promise<RenderedPage>,
   ) => {
     if (done.has(pdfPage)) return;
@@ -220,9 +235,9 @@ async function render(deps: PipelineDeps, documentId: string): Promise<void> {
     const key = `pages/${documentId}/${String(pdfPage)}.png`;
     await deps.store.put(key, page.png, "image/png");
     await deps.db.query(
-      `INSERT INTO pages (document_id, org_id, pdf_page, image_key, width, height)
-       VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
-      [documentId, doc.org_id, pdfPage, key, page.width, page.height],
+      `INSERT INTO pages (document_id, org_id, pdf_page, image_key, width, height, label)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`,
+      [documentId, doc.org_id, pdfPage, key, page.width, page.height, label],
     );
   };
 
@@ -231,10 +246,14 @@ async function render(deps: PipelineDeps, documentId: string): Promise<void> {
     const dir = await mkdtemp(join(tmpdir(), "engines-book-"));
     try {
       const file = join(dir, "book.pdf");
-      await writeFile(file, await deps.store.get(doc.source.storage_key));
+      const bytes = await deps.store.get(doc.source.storage_key);
+      await writeFile(file, bytes);
       count = await pageCount(file);
+      const labels = await pageLabels(bytes);
       for (let pdfPage = 1; pdfPage <= count; pdfPage++) {
-        await addPage(pdfPage, () => renderPage(file, pdfPage));
+        await addPage(pdfPage, labels?.[pdfPage - 1] ?? null, () =>
+          renderPage(file, pdfPage),
+        );
       }
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -243,36 +262,194 @@ async function render(deps: PipelineDeps, documentId: string): Promise<void> {
     const photos = doc.source.uploads;
     count = photos.length;
     for (const [i, photo] of photos.entries()) {
-      await addPage(i + 1, async () =>
+      await addPage(i + 1, null, async () =>
         normalisePhoto(await deps.store.get(photo.storage_key)),
       );
     }
   }
+  await deps.db.query("UPDATE documents SET page_count = $2 WHERE id = $1", [
+    documentId,
+    count,
+  ]);
 
+  const fit = await quickPass(deps, doc, count);
   await deps.db.transaction(async (tx) => {
-    const pending = await tx.query<{ pdf_page: number }>(
-      "SELECT pdf_page FROM pages WHERE document_id = $1 AND state = 'pending' ORDER BY pdf_page",
-      [documentId],
-    );
+    const auto = doc.offset_mode === "auto" && autoApprovable(fit);
+    const segments = fit.segments.map((s) => ({ ...s, confirmed: auto }));
     const moved = await tx.query(
-      `UPDATE documents SET status = 'processing', page_count = $2, pages_pending = $3, offset_segments = $4
+      `UPDATE documents SET status = 'awaiting_offset', offset_segments = $2, offset_agreement = $3
        WHERE id = $1 AND status = 'rendering'`,
-      [documentId, count, pending.rows.length, JSON.stringify(IDENTITY)],
+      [documentId, JSON.stringify(segments), fit.agreement],
     );
-    if (moved.rowCount !== 1) return;
-    for (const { pdf_page } of pending.rows) {
-      await deps.boss.send(
-        queues.readPage,
-        { documentId, pdfPage: pdf_page } satisfies PageJob,
-        {
-          db: inTransaction(tx),
-        },
-      );
-    }
-    if (pending.rows.length === 0) {
-      await startFinish(deps.boss, tx, documentId);
+    if (moved.rowCount === 1 && auto) {
+      await startReading(deps, tx, documentId, segments);
     }
   });
+}
+
+/**
+ * Step 1b: read only the printed number on the sampled pages with the cheap
+ * model, and fit the offset. Resumable like rendering: pages already read are
+ * not read again. A page whose number can't be read counts as unnumbered.
+ */
+async function quickPass(
+  deps: PipelineDeps,
+  doc: DocumentRow,
+  pageCount: number,
+): Promise<Fit> {
+  const sample = samplePages(pageCount);
+  const { rows } = await deps.db.query<{
+    pdf_page: number;
+    image_key: string;
+    quick_read: boolean;
+  }>(
+    `SELECT pdf_page, image_key, quick_read FROM pages
+     WHERE document_id = $1 AND pdf_page = ANY($2)`,
+    [doc.id, sample],
+  );
+  const reader = deps.reader(await providerOf(deps.db, doc.api_key_id));
+  const todo = rows.filter((page) => !page.quick_read);
+  await inBatches(todo, QUICK_PASS_CONCURRENCY, async (page) => {
+    let raw: string | null = null;
+    try {
+      raw = await reader.readPrintedNumber(
+        {
+          pdfPage: page.pdf_page,
+          bytes: await deps.store.get(page.image_key),
+          mediaType: "image/png",
+        },
+        { orgId: doc.org_id, documentId: doc.id },
+      );
+    } catch (error) {
+      console.error(`quick pass: page ${String(page.pdf_page)}`, error);
+    }
+    await deps.db.query(
+      `UPDATE pages SET quick_read = true, quick_raw = $3, quick_number = $4
+       WHERE document_id = $1 AND pdf_page = $2`,
+      [doc.id, page.pdf_page, raw, parsePrintedNumber(raw)],
+    );
+  });
+
+  // The quick reads, plus the PDF's own labels on the pages not sampled.
+  const evidence = await deps.db.query<{
+    pdf_page: number;
+    quick_read: boolean;
+    quick_number: number | null;
+    label: string | null;
+  }>(
+    "SELECT pdf_page, quick_read, quick_number, label FROM pages WHERE document_id = $1",
+    [doc.id],
+  );
+  return fitSegments(
+    evidence.rows.flatMap((page) => {
+      if (page.quick_read) {
+        return [{ pdf_page: page.pdf_page, printed: page.quick_number }];
+      }
+      const labelled = parsePrintedNumber(page.label);
+      return labelled === null
+        ? []
+        : [{ pdf_page: page.pdf_page, printed: labelled }];
+    }),
+  );
+}
+
+const QUICK_PASS_CONCURRENCY = 4;
+
+async function inBatches<T>(
+  items: readonly T[],
+  size: number,
+  work: (item: T) => Promise<void>,
+): Promise<void> {
+  for (let i = 0; i < items.length; i += size) {
+    await Promise.all(items.slice(i, i + size).map(work));
+  }
+}
+
+async function providerOf(db: Queryable, apiKeyId: string): Promise<Provider> {
+  const { rows } = await db.query<{ provider: Provider }>(
+    "SELECT provider FROM api_keys WHERE id = $1",
+    [apiKeyId],
+  );
+  return rows[0]?.provider ?? "openrouter";
+}
+
+/**
+ * `POST /v1/documents/{id}/offset`: accepts the proposed segments, or replaces
+ * them with the uploader's corrections, and starts the full read.
+ */
+export async function confirmOffset(
+  deps: Pick<PipelineDeps, "db" | "boss" | "clock">,
+  orgId: string,
+  documentId: string,
+  corrected: readonly { printed_from: number; pdf_from: number }[] | undefined,
+): Promise<void> {
+  await deps.db.transaction(async (tx) => {
+    const { rows } = await tx.query<{
+      status: string;
+      offset_segments: OffsetSegment[] | null;
+    }>(
+      "SELECT status, offset_segments FROM documents WHERE id = $1 AND org_id = $2 FOR UPDATE",
+      [documentId, orgId],
+    );
+    const doc = rows[0];
+    if (!doc) throw new Refusal("not_found", `No document ${documentId}.`);
+    if (doc.status !== "awaiting_offset") {
+      throw new Refusal(
+        "wrong_state",
+        `The offset can only be confirmed while the document is awaiting_offset; it is ${doc.status}.`,
+      );
+    }
+    const segments = (corrected ?? doc.offset_segments ?? []).map((s) => ({
+      printed_from: s.printed_from,
+      pdf_from: s.pdf_from,
+      confirmed: true,
+    }));
+    if (segments.length === 0) {
+      throw new Refusal(
+        "invalid_request",
+        'No page numbers were found to propose an offset. Send `segments`, for example [{ "printed_from": 1, "pdf_from": 5 }].',
+      );
+    }
+    const problems = segmentProblems(segments);
+    if (problems.length > 0) {
+      throw new Refusal("invalid_request", problems.join(" "), {
+        details: { problems },
+      });
+    }
+    await tx.query(
+      "UPDATE documents SET offset_segments = $2, offset_confirmed_at = $3 WHERE id = $1",
+      [documentId, JSON.stringify(segments), deps.clock()],
+    );
+    await startReading(deps, tx, documentId, segments);
+  });
+}
+
+/** The offset is confirmed: queue one read task per page (step 2). */
+async function startReading(
+  deps: Pick<PipelineDeps, "boss">,
+  tx: Queryable,
+  documentId: string,
+  segments: readonly OffsetSegment[],
+): Promise<void> {
+  const pending = await tx.query<{ pdf_page: number }>(
+    "SELECT pdf_page FROM pages WHERE document_id = $1 AND state = 'pending' ORDER BY pdf_page",
+    [documentId],
+  );
+  await tx.query(
+    `UPDATE documents SET status = 'processing', pages_pending = $2, offset_segments = $3
+     WHERE id = $1`,
+    [documentId, pending.rows.length, JSON.stringify(segments)],
+  );
+  for (const { pdf_page } of pending.rows) {
+    await deps.boss.send(
+      queues.readPage,
+      { documentId, pdfPage: pdf_page } satisfies PageJob,
+      { db: inTransaction(tx) },
+    );
+  }
+  if (pending.rows.length === 0) {
+    await startFinish(deps.boss, tx, documentId);
+  }
 }
 
 /** Enqueues the finish step in the caller's transaction; the queue keeps one per document. */
