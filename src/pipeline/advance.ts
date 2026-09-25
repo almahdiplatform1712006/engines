@@ -8,6 +8,7 @@
 // stage's tasks from what is stored; a stage with no tasks is passed straight
 // through. Each task settles once and counts the document down, like pages.
 import { assemble, type FailedPage } from "../assembly/assemble.ts";
+import { cutCrops } from "./crops.ts";
 import type { Join } from "../assembly/continuations.ts";
 import { findPairs } from "../assembly/continuations.ts";
 import { loadDocument, type DocumentRow } from "../documents/store.ts";
@@ -282,6 +283,7 @@ async function finish(
     failedPages: inputs.failedPages,
     joins: inputs.joins,
   });
+  await cutCrops(deps, doc.id, result);
   const status =
     result.failures.length > 0 ? "completed_with_errors" : "completed";
 

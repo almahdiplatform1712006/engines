@@ -148,6 +148,8 @@ export interface Block {
   answers: { section: string | null; number: string; answer: string }[];
   /** Why this block was changed while normalising it, if it was. */
   repaired: string | null;
+  /** For a block joined across a page break: the page it continues on. */
+  continues_on?: number;
 }
 
 /** One page as read: its printed number (raw and parsed) and normalised blocks. */

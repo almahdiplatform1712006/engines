@@ -62,6 +62,7 @@ export function applyJoins(
       id: first,
       continues: false,
       continued_from: false,
+      continues_on: join.block.pdf_page + 1,
     });
     replacement.set(second, null);
   }

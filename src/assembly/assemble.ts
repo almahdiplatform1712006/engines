@@ -12,7 +12,13 @@ import { pdfToPrinted, type OffsetSegment } from "../offset/segments.ts";
 import type { BlockKind, PageReading } from "../reading/blocks.ts";
 import { applyJoins, type Join } from "./continuations.ts";
 import { place, type Placed } from "./placement.ts";
-import type { ResultBody, StoredQuestion, StoredStimulus } from "./result.ts";
+import type {
+  ResultBody,
+  StoredImage,
+  StoredQuestion,
+  StoredStimulus,
+} from "./result.ts";
+import { linkStimuli } from "./stimuli.ts";
 import { indexTree } from "./tree-index.ts";
 
 export interface FailedPage {
@@ -107,28 +113,83 @@ export function assemble(input: AssemblyInput): ResultBody {
   }
 
   const delivers = DELIVERS[input.type];
-  for (const item of placed) {
+  const questionItems: { item: Placed; order: number }[] = [];
+  const drafts: DraftStimulus[] = [];
+  const stimulusOrder = new Map<string, number>();
+  placed.forEach((item, order) => {
     const kind = item.block.kind;
-    if (kind === "heading") continue;
+    if (kind === "heading") return;
     if (!delivers.includes(kind)) {
       result.skipped.off_type++;
-      continue;
+      return;
     }
-    if (kind === "question") {
-      const question = toQuestion(item);
-      // A question cut off at a page break, with no join, that is too broken to
-      // answer is not delivered as an item: it's an incomplete_question failure.
-      if (question.review_reason === "cut_off" && !answerable(question)) {
-        result.failures.push({
-          reason: "incomplete_question",
-          locator: item.locator,
-          detail: `question ${question.number ?? "(no number)"} is cut off at a page break: «${question.text.slice(0, 80)}»`,
-        });
+    if (kind === "question") questionItems.push({ item, order });
+    if (kind === "passage") {
+      const stimulus = toStimulus(item);
+      drafts.push(stimulus);
+      stimulusOrder.set(stimulus.id, order);
+    }
+  });
+
+  // Step 6: link questions to their passage or figure.
+  const links = linkStimuli(
+    questionItems.map(({ item, order }) => ({
+      id: itemId("q", item.block.id),
+      node_id: item.node.node.id,
+      pdf_page: item.block.pdf_page,
+      order,
+      number: item.block.question?.number ?? null,
+      stimulus_label: item.block.question?.stimulus_label ?? null,
+    })),
+    drafts.map((s) => ({
+      id: s.id,
+      node_id: s.node_id,
+      pdf_page: s.pages[0] ?? 0,
+      order: stimulusOrder.get(s.id) ?? 0,
+      label: s.label,
+      covers: s.covers,
+    })),
+  );
+  const stimuli = new Map(drafts.map((s) => [s.id, s]));
+  result.stimuli = drafts.map(toStoredStimulus);
+
+  for (const { item } of questionItems) {
+    const link = links.get(itemId("q", item.block.id));
+    const flags: string[] = link?.uncertain ? ["grouping_uncertain"] : [];
+
+    // A question that needs a figure gets it from its linked stimulus, or its
+    // own box; with neither, the owner crops it by hand in review.
+    let image: StoredImage | null = null;
+    const linked = link ? stimuli.get(link.stimulus_id) : undefined;
+    if (item.block.question?.needs_figure && !linked?.image) {
+      if (item.block.box) {
+        image = {
+          pdf_page: item.block.pdf_page,
+          box: item.block.box,
+          key: null,
+        };
       } else {
-        result.questions.push(question);
+        flags.push("image_unreadable");
+        result.failures.push({
+          reason: "image_unreadable",
+          locator: item.locator,
+          detail: `question ${item.block.question.number ?? itemId("q", item.block.id)} needs a figure that could not be located; crop it from the page in review`,
+        });
       }
     }
-    if (kind === "passage") result.stimuli.push(toStimulus(item));
+
+    const question = toQuestion(item, link?.stimulus_id ?? null, image, flags);
+    // A question cut off at a page break, with no join, that is too broken to
+    // answer is not delivered as an item: it's an incomplete_question failure.
+    if (question.review_reason === "cut_off" && !answerable(question)) {
+      result.failures.push({
+        reason: "incomplete_question",
+        locator: item.locator,
+        detail: `question ${question.number ?? "(no number)"} is cut off at a page break: «${question.text.slice(0, 80)}»`,
+      });
+    } else {
+      result.questions.push(question);
+    }
   }
 
   result.failures.sort((a, b) => a.locator.pdf_page - b.locator.pdf_page);
@@ -140,7 +201,12 @@ export function itemId(prefix: string, blockId: string): string {
   return `${prefix}_${blockId.slice(1).replace("#", "_")}`;
 }
 
-function toQuestion(item: Placed): StoredQuestion {
+function toQuestion(
+  item: Placed,
+  stimulusId: string | null,
+  image: StoredImage | null,
+  extraFlags: readonly string[],
+): StoredQuestion {
   const { block, node } = item;
   const q = block.question;
   if (q === null)
@@ -149,6 +215,7 @@ function toQuestion(item: Placed): StoredQuestion {
     // A block still flagged as running across a page break was never joined.
     block.continues || block.continued_from ? "cut_off" : null,
     item.flag,
+    ...extraFlags,
     block.repaired === null ? null : "repaired",
   ].filter((f) => f !== null);
   return {
@@ -163,26 +230,53 @@ function toQuestion(item: Placed): StoredQuestion {
     node_id: node.node.id,
     node_path: node.path,
     external_ref: node.node.external_ref,
-    stimulus_id: null,
+    stimulus_id: stimulusId,
     locator: item.locator,
     idea_tag: item.idea_tag,
     math_direction: block.math_direction,
-    image: null,
+    image,
     review_required: flags.length > 0,
     review_reason: flags[0] ?? null,
     confidence: block.confidence,
   };
 }
 
-function toStimulus(item: Placed): StoredStimulus {
+/** A stimulus, with what linking needs kept aside (`label`, `covers`) until the result is written. */
+type DraftStimulus = StoredStimulus & {
+  label: string | null;
+  covers: { from: string; to: string } | null;
+};
+
+function toStoredStimulus(draft: DraftStimulus): StoredStimulus {
+  return {
+    id: draft.id,
+    kind: draft.kind,
+    text: draft.text,
+    node_id: draft.node_id,
+    pages: draft.pages,
+    image: draft.image,
+  };
+}
+
+function toStimulus(item: Placed): DraftStimulus {
   const { block, node } = item;
+  const kind = block.stimulus?.kind ?? "passage";
   return {
     id: itemId("s", block.id),
-    kind: block.stimulus?.kind ?? "passage",
+    kind,
     text: block.text,
     node_id: node.node.id,
-    pages: [block.pdf_page],
-    image: null,
+    pages:
+      block.continues_on === undefined
+        ? [block.pdf_page]
+        : [block.pdf_page, block.continues_on],
+    // Diagrams and tables are delivered as a crop of the page too.
+    image:
+      kind !== "passage" && block.box
+        ? { pdf_page: block.pdf_page, box: block.box, key: null }
+        : null,
+    label: block.stimulus?.label ?? null,
+    covers: block.stimulus?.covers ?? null,
   };
 }
 
