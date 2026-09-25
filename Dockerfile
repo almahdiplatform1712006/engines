@@ -16,6 +16,10 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY src ./src
 COPY migrations ./migrations
 
+# Local blob storage (STORAGE=local), owned by the runtime user so a compose
+# volume mounted here is writable.
+RUN mkdir -p /data/storage && chown node:node /data/storage
+
 USER node
 ENV PORT=8080
 EXPOSE 8080

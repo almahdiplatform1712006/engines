@@ -5,6 +5,16 @@ x-app: &app
   image: engines:local
   environment:
     DATABASE_URL: postgres://engines:engines@postgres:5432/engines
+    STORAGE: local
+    STORAGE_DIR: /data/storage
+    PUBLIC_URL: http://localhost:8080
+    # Signs local URLs on this machine only. Not a secret of any real system.
+    LOCAL_STORAGE_SECRET: local-development-only
+    AI_MODEL: ${AI_MODEL:-}
+    AI_MODEL_CHEAP: ${AI_MODEL_CHEAP:-}
+    OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  volumes:
+    - storage:/data/storage
 
 services:
   postgres:
@@ -47,3 +57,4 @@ services:
 
 volumes:
   pgdata:
+  storage:

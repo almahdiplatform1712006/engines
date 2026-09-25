@@ -52,21 +52,22 @@ jobs:
       - name: poppler is in the image
         run: docker run --rm engines:ci sh -c 'command -v pdftoppm && command -v pdftocairo && pdftoppm -v'
 
+      - name: migrations run cleanly on the compose Postgres
+        run: |
+          docker tag engines:ci engines:local
+          docker compose up -d --wait postgres
+          docker compose run --rm migrate
+          docker compose run --rm migrate
+
       - name: GET /v1/health returns 200 from the container
         run: |
-          docker run -d --name api -p 8080:8080 engines:ci
+          docker compose up -d api
           for _ in $(seq 1 30); do
             if curl -fsS localhost:8080/v1/health; then exit 0; fi
             sleep 1
           done
-          docker logs api
+          docker compose logs api
           exit 1
-
-      - name: migrations run cleanly on the compose Postgres
-        run: |
-          docker compose up -d --wait postgres
-          docker compose run --rm migrate
-          docker compose run --rm migrate
 
       - name: the worker entry point starts and connects pg-boss
         run: |

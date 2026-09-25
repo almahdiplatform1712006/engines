@@ -37,3 +37,96 @@ function parse<T extends z.ZodType>(schema: T, env: Env): z.output<T> {
   }
   return result.data;
 }
+
+export type Provider = "openrouter" | "vertex";
+
+/** An optional setting where an empty value (as .env.example leaves them) means unset. */
+const optional = z
+  .string()
+  .optional()
+  .transform((v) => (v === "" ? undefined : v));
+
+const aiEnv = z.object({
+  AI_MODEL: optional,
+  AI_MODEL_CHEAP: optional,
+  OPENROUTER_API_KEY: optional,
+  VERTEX_PROJECT: optional,
+  VERTEX_LOCATION: optional,
+});
+
+export interface AiConfig {
+  /** Reads pages. */
+  model: string | undefined;
+  /** Reads printed page numbers in the quick pass. Defaults to `model`. */
+  cheapModel: string | undefined;
+  openrouterApiKey: string | undefined;
+  vertexProject: string | undefined;
+  vertexLocation: string | undefined;
+}
+
+/** Model settings. Missing values are only an error when a model is actually called. */
+export function readAiConfig(env: Env): AiConfig {
+  const e = parse(aiEnv, env);
+  return {
+    model: e.AI_MODEL,
+    cheapModel: e.AI_MODEL_CHEAP ?? e.AI_MODEL,
+    openrouterApiKey: e.OPENROUTER_API_KEY,
+    vertexProject: e.VERTEX_PROJECT,
+    vertexLocation: e.VERTEX_LOCATION,
+  };
+}
+
+const storageEnv = z.discriminatedUnion("STORAGE", [
+  z.object({
+    STORAGE: z.literal("local"),
+    STORAGE_DIR: z.string().default(".data/storage"),
+    PUBLIC_URL: z.url().default("http://localhost:8080"),
+    LOCAL_STORAGE_SECRET: z
+      .string()
+      .min(16, "LOCAL_STORAGE_SECRET must be at least 16 characters"),
+  }),
+  z.object({
+    STORAGE: z.literal("gcs"),
+    GCS_BUCKET_UPLOADS: z.string().min(1),
+    GCS_BUCKET_PAGES: z.string().min(1),
+    GCS_BUCKET_RESULTS: z.string().min(1),
+    PUBLIC_URL: z.url().optional(),
+  }),
+]);
+
+export type StorageConfig =
+  | { kind: "local"; dir: string; publicUrl: string; secret: string }
+  | {
+      kind: "gcs";
+      buckets: { uploads: string; pages: string; results: string };
+      publicUrl: string | undefined;
+    };
+
+export function readStorageConfig(env: Env): StorageConfig {
+  const e = parse(storageEnv, { STORAGE: "local", ...env });
+  if (e.STORAGE === "local") {
+    return {
+      kind: "local",
+      dir: e.STORAGE_DIR,
+      publicUrl: e.PUBLIC_URL,
+      secret: e.LOCAL_STORAGE_SECRET,
+    };
+  }
+  return {
+    kind: "gcs",
+    buckets: {
+      uploads: e.GCS_BUCKET_UPLOADS,
+      pages: e.GCS_BUCKET_PAGES,
+      results: e.GCS_BUCKET_RESULTS,
+    },
+    publicUrl: e.PUBLIC_URL,
+  };
+}
+
+const workerEnv = z.object({
+  PAGE_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(4),
+});
+
+export function readWorkerConfig(env: Env): { pageConcurrency: number } {
+  return { pageConcurrency: parse(workerEnv, env).PAGE_CONCURRENCY };
+}

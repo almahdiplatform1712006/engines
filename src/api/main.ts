@@ -1,10 +1,38 @@
 import { serve } from "@hono/node-server";
-import { readApiConfig } from "../shared/config.ts";
+import { PgBoss } from "pg-boss";
+import { createQueues } from "../pipeline/pipeline.ts";
+import { systemClock } from "../shared/clock.ts";
+import {
+  readApiConfig,
+  readDatabaseConfig,
+  readStorageConfig,
+} from "../shared/config.ts";
+import { connect } from "../shared/db/pool.ts";
+import { storeFromConfig } from "../storage/from-config.ts";
 import { createApp } from "./app.ts";
 
 const { port } = readApiConfig(process.env);
+const { databaseUrl } = readDatabaseConfig(process.env);
+const db = connect(databaseUrl);
+// The API only sends jobs; the worker runs pg-boss's maintenance.
+const boss = new PgBoss({
+  connectionString: databaseUrl,
+  supervise: false,
+  schedule: false,
+});
+boss.on("error", (error) => {
+  console.error("pg-boss error", error);
+});
+await boss.start();
+await createQueues(boss);
 
-const server = serve({ fetch: createApp().fetch, port }, (info) => {
+const app = createApp({
+  db,
+  boss,
+  store: storeFromConfig(readStorageConfig(process.env)),
+  clock: systemClock,
+});
+const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`api listening on :${String(info.port)}`);
 });
 
@@ -12,7 +40,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     server.close((error) => {
       if (error) console.error(error);
-      process.exit(error ? 1 : 0);
+      void Promise.allSettled([boss.stop({ graceful: true }), db.close()]).then(
+        () => process.exit(error ? 1 : 0),
+      );
     });
   });
 }

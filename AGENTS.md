@@ -21,12 +21,22 @@ Also from the spec: the model name is config, never hard-coded at a call site. p
 | Path             | What                                                                        |
 | ---------------- | --------------------------------------------------------------------------- |
 | `src/api/`       | HTTP service (Hono). `app.ts` builds the app, `main.ts` serves it           |
-| `src/worker/`    | pg-boss worker. `worker.ts` registers queues, `main.ts` runs it             |
-| `src/shared/`    | Config (Zod-parsed env), queue names, database migrations runner            |
+| `src/worker/`    | pg-boss worker. `worker.ts` starts the pipeline, `main.ts` runs it          |
+| `src/contract/`  | Zod schemas of every `/v1/` shape                                           |
+| `src/pipeline/`  | The document stage machine: render, per-page reads, finish                  |
+| `src/assembly/`  | Pure: page readings + tree + offset → result (placement lives here)         |
+| `src/reading/`   | The model seam: `PageReader`, the model adapter, the scripted adapter       |
+| `src/offset/`    | Pure: printed ↔ PDF page mapping                                            |
+| `src/outline/`   | Syllabus tree validation and storage                                        |
+| `src/render/`    | poppler (`pdftoppm` → `pdftocairo`) and photo normalisation                 |
+| `src/storage/`   | `BlobStore`: local disk (dev, tests) and Google Cloud Storage               |
+| `src/accounts/`  | Organisations, API keys, `authenticate`                                     |
+| `src/shared/`    | Config (Zod-parsed env), database pool and migrations, text normalisation   |
 | `src/golden/`    | Golden-set tools: file formats, drafting, correction sheet, scorers         |
 | `golden/`        | Golden-set manifests, truth files and runs. Page images are never committed |
 | `migrations/`    | SQL migrations (node-pg-migrate, `-- Up Migration` / `-- Down Migration`)   |
-| `test/`          | Test harness: Postgres for database tests                                   |
+| `test/`          | Test harness: Postgres, the whole stack on a scripted reader, PDF builder   |
+| `docs/adr/`      | Architecture decisions. Read `0001` before touching the pipeline            |
 | `docs/research/` | Tooling research behind spec §5                                             |
 | `docs/agents/`   | How agents use the issue tracker, labels and domain docs                    |
 
@@ -69,6 +79,22 @@ npm run start:worker
 ```
 
 Nothing here connects to any Google Cloud database.
+
+Run a book through the engine locally (needs `AI_MODEL` and `OPENROUTER_API_KEY` in `.env`, and poppler on the host):
+
+```sh
+npm run seed -- "My organisation"      # prints an API key
+KEY=eng_…
+curl -s localhost:8080/v1/uploads -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"filename":"book.pdf","content_type":"application/pdf","size":'$(stat -c%s book.pdf)'}'
+curl -s -X PUT --data-binary @book.pdf "<upload_url>"
+curl -s localhost:8080/v1/outlines -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"source":{"type":"manual","nodes":[{"name":"Lesson 1","printed_pages":{"from":1,"to":10}}]}}'
+curl -s -X POST localhost:8080/v1/outlines/<outline_id>/confirm -H "authorization: Bearer $KEY"
+curl -s localhost:8080/v1/documents -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"outline_id":"<outline_id>","type":"questions","source":{"upload_id":"<upload_id>"}}'
+curl -s localhost:8080/v1/documents/<document_id> -H "authorization: Bearer $KEY"
+```
 
 ## Golden set
 

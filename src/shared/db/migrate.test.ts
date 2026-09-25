@@ -4,6 +4,7 @@ import {
   createTestDatabase,
   type TestDatabase,
 } from "../../../test/database.ts";
+import { readdir } from "node:fs/promises";
 import { runMigrations } from "./migrate.ts";
 
 let db: TestDatabase;
@@ -15,6 +16,11 @@ after(async () => {
 });
 
 test("migrations apply cleanly to an empty database, then are a no-op", async () => {
-  assert.deepEqual(await runMigrations(db.url), ["0001_init"]);
+  const files = (await readdir(new URL("../../../migrations", import.meta.url)))
+    .filter((f) => f.endsWith(".sql"))
+    .map((f) => f.replace(/\.sql$/, ""))
+    .sort();
+  assert.equal(files[0], "0001_init");
+  assert.deepEqual(await runMigrations(db.url), files);
   assert.deepEqual(await runMigrations(db.url), []);
 });

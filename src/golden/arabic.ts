@@ -1,27 +1,7 @@
+import { normalizeArabic } from "../shared/text.ts";
 import type { Ratio } from "./ratio.ts";
 
-const TATWEEL = /ـ/g; // U+0640 tatweel
-const ALEF_FORMS = /[آأإٱ]/g; // U+0622 U+0623 U+0625 U+0671 → U+0627
-const YA_FORMS = /[ىی]/g; // U+0649 alef maqsura, U+06CC Farsi yeh → U+064A
-const ARABIC_INDIC_DIGIT = /[٠-٩]/g; // U+0660–U+0669
-const EASTERN_ARABIC_INDIC_DIGIT = /[۰-۹]/g; // U+06F0–U+06F9
-
-/**
- * Normalises Arabic text before comparing it: strips tatweel, unifies alef and
- * ya forms, turns Arabic-Indic digits into ASCII and collapses whitespace.
- */
-export function normalizeArabic(text: string): string {
-  return text
-    .replace(TATWEEL, "")
-    .replace(ALEF_FORMS, "ا")
-    .replace(YA_FORMS, "ي")
-    .replace(ARABIC_INDIC_DIGIT, (d) => String(d.charCodeAt(0) - 0x0660))
-    .replace(EASTERN_ARABIC_INDIC_DIGIT, (d) =>
-      String(d.charCodeAt(0) - 0x06f0),
-    )
-    .replace(/\s+/g, " ")
-    .trim();
-}
+export { normalizeArabic };
 
 /**
  * Character error rate of `predicted` against `truth`, after normalising both:
