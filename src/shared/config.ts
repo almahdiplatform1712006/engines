@@ -16,6 +16,17 @@ export interface ApiConfig {
   port: number;
 }
 
+const webhookEnv = z.object({
+  WEBHOOK_ALLOW_PRIVATE: z.enum(["true", "false"]).default("false"),
+});
+
+/** Local development only: let webhooks reach http:// and private addresses. */
+export function readWebhookPolicy(env: Env): { allowPrivate: boolean } {
+  return {
+    allowPrivate: parse(webhookEnv, env).WEBHOOK_ALLOW_PRIVATE === "true",
+  };
+}
+
 export interface DatabaseConfig {
   databaseUrl: string;
 }
@@ -125,12 +136,15 @@ export function readStorageConfig(env: Env): StorageConfig {
 
 const workerEnv = z.object({
   PAGE_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(4),
+  MODEL_CONCURRENCY: z.coerce.number().int().min(1).max(256).default(8),
   CHUNK_MAX_TOKENS: z.coerce.number().int().min(50).default(800),
   CHUNK_MIN_TOKENS: z.coerce.number().int().min(0).default(60),
 });
 
 export interface WorkerConfig {
   pageConcurrency: number;
+  /** Model calls one worker makes at once, across every key (E-13). */
+  modelConcurrency: number;
   /** Explanation chunk sizes, in estimated tokens (E-12). */
   chunking: { maxTokens: number; minTokens: number };
 }
@@ -139,6 +153,7 @@ export function readWorkerConfig(env: Env): WorkerConfig {
   const e = parse(workerEnv, env);
   return {
     pageConcurrency: e.PAGE_CONCURRENCY,
+    modelConcurrency: e.MODEL_CONCURRENCY,
     chunking: { maxTokens: e.CHUNK_MAX_TOKENS, minTokens: e.CHUNK_MIN_TOKENS },
   };
 }

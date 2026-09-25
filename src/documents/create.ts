@@ -5,8 +5,11 @@ import { requireEntitlement } from "../accounts/entitlements.ts";
 import type { Caller } from "../accounts/keys.ts";
 import type { CreateDocumentRequest } from "../contract/document.ts";
 import { getOutline, markInUse } from "../outline/store.ts";
-import { admit } from "../pipeline/pipeline.ts";
-import { addDays, type Clock } from "../shared/clock.ts";
+import type { Warning } from "../contract/document.ts";
+import { admit, checkQueueRoom } from "../pipeline/admit.ts";
+import { checkWebhookUrl, type TargetPolicy } from "../webhooks/target.ts";
+import { createHash } from "node:crypto";
+import { addDays, DAY_MS, type Clock } from "../shared/clock.ts";
 import type { Db } from "../shared/db/pool.ts";
 import { newId } from "../shared/ids.ts";
 import { Refusal } from "../shared/refusal.ts";
@@ -22,12 +25,15 @@ export interface CreateDeps {
   boss: PgBoss;
   store: BlobStore;
   clock: Clock;
+  webhooks: TargetPolicy;
 }
 
 export interface Created {
   id: string;
   object: "document";
   status: string;
+  /** Set when this exact file was processed before (spec decision Q18): a re-run is a new job. */
+  warning: Warning | null;
 }
 
 export async function createDocument(
@@ -49,7 +55,14 @@ export async function createDocument(
   if (request.type !== "questions") {
     await requireEntitlement(db, caller.orgId, "explanation");
   }
+  if (request.webhook_url !== undefined)
+    checkWebhookUrl(request.webhook_url, deps.webhooks);
   const source = await resolveSource(deps, caller.orgId, request.source);
+  const fileHash = await fingerprintOf(deps.store, source);
+  const warning =
+    fileHash === null
+      ? null
+      : await sameFileWarning(db, clock, caller.orgId, fileHash);
   const uploadIds =
     source.kind === "pdf"
       ? [source.upload_id]
@@ -58,10 +71,13 @@ export async function createDocument(
   const id = newId("doc");
   const now = clock();
   const status = await db.transaction(async (tx) => {
+    // 429 when the key's queue is full; holds the key's lock until commit.
+    await checkQueueRoom(tx, caller.apiKeyId);
     await tx.query(
       `INSERT INTO documents
-         (id, org_id, api_key_id, outline_id, type, language, status, source, webhook_url, created_at, expires_at, offset_mode)
-       VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, $9, $10, $11)`,
+         (id, org_id, api_key_id, outline_id, type, language, status, source, webhook_url,
+          created_at, expires_at, offset_mode, file_hash, warning)
+       VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, $9, $10, $11, $12, $13)`,
       [
         id,
         caller.orgId,
@@ -74,6 +90,8 @@ export async function createDocument(
         now,
         addDays(now, DOCUMENT_TTL_DAYS),
         request.offset ?? "confirm",
+        fileHash,
+        warning === null ? null : JSON.stringify(warning),
       ],
     );
     await claimUploads(tx, id, uploadIds);
@@ -85,7 +103,7 @@ export async function createDocument(
     );
     return rows[0]?.status ?? "queued";
   });
-  return { id, object: "document", status };
+  return { id, object: "document", status, warning };
 }
 
 async function resolveSource(
@@ -131,4 +149,47 @@ async function resolveSource(
     uploads.push({ upload_id: upload.id, storage_key: upload.storageKey });
   }
   return { kind: "images", uploads };
+}
+
+/** The book's fingerprint: its file's, or every photo's in order. Null when storage has none. */
+async function fingerprintOf(
+  store: BlobStore,
+  source: DocumentSource,
+): Promise<string | null> {
+  const keys =
+    source.kind === "pdf"
+      ? [source.storage_key]
+      : source.uploads.map((u) => u.storage_key);
+  const prints = await Promise.all(keys.map((key) => store.fingerprint(key)));
+  if (prints.some((p) => p === null)) return null;
+  return keys.length === 1
+    ? (prints[0] ?? null)
+    : createHash("sha256").update(prints.join("|")).digest("base64");
+}
+
+/** "You processed this exact file N days ago": the organisation's latest document of the same bytes. */
+async function sameFileWarning(
+  db: Db,
+  clock: Clock,
+  orgId: string,
+  fileHash: string,
+): Promise<Warning | null> {
+  const { rows } = await db.query<{ id: string; created_at: Date }>(
+    "SELECT id, created_at FROM documents WHERE org_id = $1 AND file_hash = $2 ORDER BY created_at DESC LIMIT 1",
+    [orgId, fileHash],
+  );
+  const earlier = rows[0];
+  if (!earlier) return null;
+  const days = Math.floor(
+    (clock().getTime() - earlier.created_at.getTime()) / DAY_MS,
+  );
+  return {
+    code: "same_file_processed",
+    message:
+      days === 0
+        ? "You processed this exact file earlier today. This is a new job."
+        : `You processed this exact file ${String(days)} day${days === 1 ? "" : "s"} ago. This is a new job.`,
+    document_id: earlier.id,
+    processed_at: earlier.created_at.toISOString(),
+  };
 }

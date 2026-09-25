@@ -7,6 +7,8 @@ import type { Clock } from "../shared/clock.ts";
 import type { Provider } from "../shared/config.ts";
 import type { Db, Queryable } from "../shared/db/pool.ts";
 import type { BlobStore } from "../storage/store.ts";
+import { createWebhookQueue } from "../webhooks/deliver.ts";
+import type { TargetPolicy } from "../webhooks/target.ts";
 
 export const queues = {
   render: "document.render",
@@ -28,6 +30,7 @@ export interface PipelineDeps {
   reader(provider: Provider): PageReader;
   /** Explanation chunk sizes; the defaults when unset. */
   chunking?: ChunkOptions;
+  webhooks: TargetPolicy;
 }
 
 export interface PipelineOptions {
@@ -39,6 +42,8 @@ export interface PipelineOptions {
   pageAttempts: number;
   /** How often an idle worker polls each queue. */
   pollingIntervalSeconds: number;
+  /** Seconds before a failed webhook delivery is retried (backoff doubles it). */
+  webhookRetryDelay: number;
 }
 
 export const DEFAULT_OPTIONS: PipelineOptions = {
@@ -46,6 +51,7 @@ export const DEFAULT_OPTIONS: PipelineOptions = {
   retryDelay: 5,
   pageAttempts: 3,
   pollingIntervalSeconds: 2,
+  webhookRetryDelay: 30,
 };
 
 export interface DocumentJob {
@@ -104,6 +110,7 @@ export async function createQueues(
       deadLetter,
     });
   }
+  await createWebhookQueue(boss, options.webhookRetryDelay);
   // One advance per document runs at a time, and one more may wait behind it
   // (`stately`: one job per state per singleton key). A task settling while
   // an advance is still active queues the next one instead of being dropped.

@@ -31,6 +31,15 @@ export function gcsStore(buckets: GcsBuckets, origin?: string): BlobStore {
         throw error;
       }
     },
+    async fingerprint(key) {
+      try {
+        const [metadata] = await file(key).getMetadata();
+        return metadata.md5Hash ?? null;
+      } catch (error) {
+        if ((error as { code?: number }).code === 404) return null;
+        throw error;
+      }
+    },
     async delete(key) {
       await file(key).delete({ ignoreNotFound: true });
     },

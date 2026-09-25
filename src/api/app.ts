@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { PgBoss } from "pg-boss";
 import { authenticate, type Caller } from "../accounts/keys.ts";
 import {
@@ -24,14 +24,22 @@ import type { Clock } from "../shared/clock.ts";
 import type { Db } from "../shared/db/pool.ts";
 import { Refusal } from "../shared/refusal.ts";
 import type { BlobStore } from "../storage/store.ts";
+import type { TargetPolicy } from "../webhooks/target.ts";
 import { CreateUploadRequest, createUpload } from "../uploads/uploads.ts";
+import { webhookSecret } from "../webhooks/deliver.ts";
 import { errorResponse, readBody, unauthorized } from "./errors.ts";
+import {
+  IDEMPOTENCY_HEADER,
+  withIdempotency,
+  type Stored,
+} from "./idempotency.ts";
 
 export interface AppDeps {
   db: Db;
   boss: PgBoss;
   store: BlobStore & { routes?: Hono };
   clock: Clock;
+  webhooks: TargetPolicy;
 }
 
 interface Env {
@@ -68,17 +76,39 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(upload, 201);
   });
 
-  v1.post("/outlines", async (c) => {
-    const body = await readBody(c, CreateOutlineRequest);
-    const nodes = normaliseTree(body.source.nodes);
-    const outline = await createOutline(
+  /** Runs a create at most once per Idempotency-Key (24 h). */
+  const once = (
+    c: Context<Env>,
+    route: string,
+    body: unknown,
+    run: () => Promise<Stored>,
+  ) =>
+    withIdempotency(
       db,
       clock,
-      c.var.caller.orgId,
-      { type: body.source.type },
-      nodes,
+      {
+        orgId: c.var.caller.orgId,
+        key: c.req.header(IDEMPOTENCY_HEADER),
+        route,
+        body,
+      },
+      run,
     );
-    return c.json(outlineView(outline), 201);
+
+  v1.post("/outlines", async (c) => {
+    const body = await readBody(c, CreateOutlineRequest);
+    const response = await once(c, "POST /v1/outlines", body, async () => {
+      const nodes = normaliseTree(body.source.nodes);
+      const outline = await createOutline(
+        db,
+        clock,
+        c.var.caller.orgId,
+        { type: body.source.type },
+        nodes,
+      );
+      return { status: 201, body: outlineView(outline) };
+    });
+    return c.json(response.body, response.status as 201);
   });
 
   v1.get("/outlines/:id", async (c) => {
@@ -112,7 +142,18 @@ export function createApp(deps: AppDeps): Hono {
 
   v1.post("/documents", async (c) => {
     const body = await readBody(c, CreateDocumentRequest);
-    return c.json(await createDocument(deps, c.var.caller, body), 202);
+    const response = await once(c, "POST /v1/documents", body, async () => ({
+      status: 202,
+      body: await createDocument(deps, c.var.caller, body),
+    }));
+    return c.json(response.body, response.status as 202);
+  });
+
+  v1.get("/webhook_secret", async (c) => {
+    return c.json({
+      object: "webhook_secret",
+      secret: await webhookSecret(db, c.var.caller.orgId),
+    });
   });
 
   v1.post("/documents/:id/offset", async (c) => {

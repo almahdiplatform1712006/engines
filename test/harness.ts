@@ -45,6 +45,7 @@ export interface Harness {
     documentId: string,
     statuses: string[],
     timeoutMs?: number,
+    key?: string,
   ): Promise<Record<string, unknown>>;
   newKey(
     orgName?: string,
@@ -84,6 +85,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
     store,
     clock,
     reader: options.reader,
+    webhooks: { allowPrivate: true },
     options: {
       retryDelay: 1,
       pollingIntervalSeconds: 0.5,
@@ -91,7 +93,13 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
     },
   });
   const db = connect(database.url);
-  const app = createApp({ db, boss: worker.boss, store, clock });
+  const app = createApp({
+    db,
+    boss: worker.boss,
+    store,
+    clock,
+    webhooks: { allowPrivate: true },
+  });
 
   const newKey = async (orgName = "Test organisation") => {
     const orgId = await createOrganisation(db, orgName);
@@ -140,11 +148,16 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
         throw new Error(`upload PUT failed: ${String(put.status)}`);
       return id;
     },
-    async waitFor(documentId, statuses, timeoutMs = 30_000) {
+    async waitFor(documentId, statuses, timeoutMs = 30_000, key = me.key) {
       const deadline = Date.now() + timeoutMs;
       let last: Record<string, unknown> = {};
       while (Date.now() < deadline) {
-        const response = await call("GET", `/v1/documents/${documentId}`);
+        const response = await call(
+          "GET",
+          `/v1/documents/${documentId}`,
+          undefined,
+          key,
+        );
         last = (await response.json()) as Record<string, unknown>;
         if (statuses.includes(String(last["status"]))) return last;
         await sleep(100);
@@ -207,7 +220,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
         202,
       );
       const id = String(doc["id"]);
-      await harness.waitFor(id, ["awaiting_offset"]);
+      await harness.waitFor(id, ["awaiting_offset"], 30_000, key);
       await expect(
         await call(
           "POST",
@@ -217,11 +230,12 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
         ),
         200,
       );
-      return (await harness.waitFor(id, [
-        "completed",
-        "completed_with_errors",
-        "failed",
-      ])) as unknown as Document;
+      return (await harness.waitFor(
+        id,
+        ["completed", "completed_with_errors", "failed"],
+        30_000,
+        key,
+      )) as unknown as Document;
     },
     async close() {
       await worker.stop();

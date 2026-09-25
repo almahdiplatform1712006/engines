@@ -21,6 +21,12 @@ import {
 } from "./deps.ts";
 import { readPage, settlePage } from "./read.ts";
 import { render } from "./render.ts";
+import { sweep, SWEEP_QUEUE } from "./sweep.ts";
+import {
+  deliverWebhook,
+  WEBHOOK_QUEUE,
+  type WebhookJob,
+} from "../webhooks/deliver.ts";
 
 export { admit } from "./admit.ts";
 export { createQueues, DEFAULT_OPTIONS, queues } from "./deps.ts";
@@ -69,6 +75,15 @@ export async function registerPipeline(
   });
   await boss.work<DocumentJob>(queues.advance, poll, async ([job]) => {
     if (job) await advance(deps, job.data.documentId);
+  });
+  // The sweep runs every minute on whichever worker picks it up.
+  await boss.createQueue(SWEEP_QUEUE, { policy: "singleton", retryLimit: 0 });
+  await boss.schedule(SWEEP_QUEUE, "* * * * *");
+  await boss.work(SWEEP_QUEUE, poll, async () => {
+    await sweep(deps);
+  });
+  await boss.work<WebhookJob>(WEBHOOK_QUEUE, poll, async ([job]) => {
+    if (job) await deliverWebhook(deps, job.data);
   });
   await boss.work<DocumentJob>(queues.advanceDead, poll, async ([job]) => {
     if (job)

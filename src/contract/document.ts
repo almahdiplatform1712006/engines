@@ -115,6 +115,14 @@ export const Skipped = z.object({
   off_type: z.int(),
 });
 
+export const Warning = z.object({
+  code: z.string().describe("same_file_processed | …"),
+  message: z.string(),
+  document_id: z.string().nullable(),
+  processed_at: z.string().nullable(),
+});
+export type Warning = z.infer<typeof Warning>;
+
 export const Document = z.object({
   id: z.string(),
   object: z.literal("document"),
@@ -127,6 +135,7 @@ export const Document = z.object({
   progress: z.object({ pages_total: z.int().nullable(), pages_read: z.int() }),
   usage: z.object({ pages: z.int() }),
   offset: z.array(OffsetSegment),
+  warning: Warning.nullable(),
   /** Share of the quick pass's page numbers that agree with the proposed offset (0–1). */
   offset_agreement: z.number().nullable(),
   stimuli: z.array(Stimulus),

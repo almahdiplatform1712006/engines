@@ -4,6 +4,7 @@ import type {
   DocumentStatus,
   DocumentType,
   Failure,
+  Warning,
 } from "../contract/document.ts";
 import type {
   ResultBody,
@@ -35,6 +36,7 @@ export interface DocumentRow {
   stage: "read" | "pair" | "solve" | "finish";
   offset_segments: OffsetSegment[] | null;
   offset_mode: "confirm" | "auto";
+  warning: Warning | null;
   offset_agreement: number | null;
   revision: number;
   error: string | null;
@@ -116,6 +118,7 @@ export async function documentView(
       pages_read: progress.rows[0]?.read ?? 0,
     },
     usage: { pages: body ? (row.page_count ?? 0) : 0 },
+    warning: row.warning,
     offset: row.offset_segments ?? [],
     offset_agreement: row.offset_agreement,
     stimuli: await Promise.all(

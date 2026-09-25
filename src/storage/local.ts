@@ -1,7 +1,8 @@
 // The local-disk BlobStore for development and tests. It stands in for Google
 // Cloud Storage, including signed URLs and the resumable upload protocol, which
 // the API serves under /local-storage/ (see `localStorageRoutes`).
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
 import {
   open,
   mkdir,
@@ -77,6 +78,16 @@ export function localStore(options: LocalStoreOptions): LocalStore {
     async size(key) {
       try {
         return (await stat(pathOf(key))).size;
+      } catch {
+        return null;
+      }
+    },
+    async fingerprint(key) {
+      try {
+        const hash = createHash("md5");
+        for await (const chunk of createReadStream(pathOf(key)))
+          hash.update(chunk as Buffer);
+        return hash.digest("base64");
       } catch {
         return null;
       }

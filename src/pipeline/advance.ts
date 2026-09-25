@@ -12,6 +12,8 @@ import {
   type AssemblyInput,
   type FailedPage,
 } from "../assembly/assemble.ts";
+import { enqueueWebhook } from "../webhooks/deliver.ts";
+import { admitNext } from "./admit.ts";
 import { cutCrops } from "./crops.ts";
 import type { Join } from "../assembly/continuations.ts";
 import { findPairs, type Pair } from "../assembly/continuations.ts";
@@ -313,19 +315,26 @@ async function finish(
   const status =
     result.failures.length > 0 ? "completed_with_errors" : "completed";
 
-  await deps.db.transaction(async (tx) => {
+  const ended = await deps.db.transaction(async (tx) => {
     await tx.query(
       `INSERT INTO revisions (document_id, org_id, number, result) VALUES ($1, $2, 1, $3)
        ON CONFLICT (document_id, number) DO NOTHING`,
       [doc.id, doc.org_id, JSON.stringify(result)],
     );
-    await tx.query(
+    const moved = await tx.query(
       `UPDATE documents SET status = $2, stage = 'finish', revision = 1, finished_at = $3
        WHERE id = $1 AND status = 'processing'`,
       [doc.id, status, deps.clock()],
     );
+    if (moved.rowCount !== 1) return false;
+    await enqueueWebhook(deps.boss, tx, {
+      documentId: doc.id,
+      status,
+      revision: 1,
+    });
+    return true;
   });
-  await deleteBook(deps, doc);
+  if (ended) await afterEnd(deps, doc);
 }
 
 export async function failDocument(
@@ -334,19 +343,32 @@ export async function failDocument(
   error: string,
 ): Promise<void> {
   const doc = await loadDocument(deps.db, documentId);
-  const { rowCount } = await deps.db.query(
-    `UPDATE documents SET status = 'failed', error = $2, finished_at = $3
-     WHERE id = $1 AND status NOT IN ('completed', 'completed_with_errors', 'failed')`,
-    [documentId, error, deps.clock()],
-  );
-  if (rowCount === 1) await deleteBook(deps, doc);
+  const ended = await deps.db.transaction(async (tx) => {
+    const moved = await tx.query(
+      `UPDATE documents SET status = 'failed', error = $2, finished_at = $3
+       WHERE id = $1 AND status NOT IN ('completed', 'completed_with_errors', 'failed')`,
+      [documentId, error, deps.clock()],
+    );
+    if (moved.rowCount !== 1) return false;
+    await enqueueWebhook(deps.boss, tx, {
+      documentId,
+      status: "failed",
+      revision: doc.revision,
+    });
+    return true;
+  });
+  if (ended) await afterEnd(deps, doc);
 }
 
-/** The book file is deleted when its job ends (spec §6). Page images stay for review. */
-async function deleteBook(deps: PipelineDeps, doc: DocumentRow): Promise<void> {
+/**
+ * After a job ends: the book file is deleted (spec §6; page images stay for
+ * review), and the key's slot goes to its next waiting document.
+ */
+async function afterEnd(deps: PipelineDeps, doc: DocumentRow): Promise<void> {
   const keys =
     doc.source.kind === "pdf"
       ? [doc.source.storage_key]
       : doc.source.uploads.map((u) => u.storage_key);
   for (const key of keys) await deps.store.delete(key);
+  await admitNext(deps, doc.api_key_id);
 }

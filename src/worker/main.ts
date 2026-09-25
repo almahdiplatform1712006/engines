@@ -1,3 +1,4 @@
+import { callLimiter } from "../reading/limit.ts";
 import { createModelReader } from "../reading/model.ts";
 import { recordCallsIn } from "../reading/log.ts";
 import { languageModel } from "../reading/providers.ts";
@@ -7,6 +8,7 @@ import {
   readAiConfig,
   readDatabaseConfig,
   readStorageConfig,
+  readWebhookPolicy,
   readWorkerConfig,
   type Provider,
 } from "../shared/config.ts";
@@ -22,23 +24,27 @@ const record = recordCallsIn(logDb);
 // One reader per provider, built on first use so a worker starts without keys
 // and only fails the pages it can't read.
 const readers = new Map<Provider, PageReader>();
+const workerConfig = readWorkerConfig(process.env);
+const limit = callLimiter(workerConfig.modelConcurrency);
 const reader = (provider: Provider): PageReader => {
   let existing = readers.get(provider);
   if (!existing) {
-    existing = createModelReader({
-      main: languageModel(ai, provider, "main"),
-      cheap: languageModel(ai, provider, "cheap"),
-      record,
-    });
+    existing = limit(
+      createModelReader({
+        main: languageModel(ai, provider, "main"),
+        cheap: languageModel(ai, provider, "cheap"),
+        record,
+      }),
+    );
     readers.set(provider, existing);
   }
   return existing;
 };
 
-const workerConfig = readWorkerConfig(process.env);
 const worker = await startWorker({
   databaseUrl,
   chunking: workerConfig.chunking,
+  webhooks: readWebhookPolicy(process.env),
   store: storeFromConfig(readStorageConfig(process.env)),
   clock: systemClock,
   reader,

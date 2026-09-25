@@ -18,7 +18,7 @@ import {
 } from "../render/render.ts";
 import { parsePrintedNumber } from "../shared/text.ts";
 import { inBatches, providerOf, type PipelineDeps } from "./deps.ts";
-import { startReading } from "./offset.ts";
+import { admit } from "./admit.ts";
 
 const QUICK_PASS_CONCURRENCY = 4;
 
@@ -93,14 +93,15 @@ export async function render(
   await deps.db.transaction(async (tx) => {
     const auto = doc.offset_mode === "auto" && autoApprovable(fit);
     const segments = fit.segments.map((s) => ({ ...s, confirmed: auto }));
+    // Waiting for a person releases the key's slot; an auto-approved offset is
+    // confirmed now and takes the next free slot to start the full read.
     const moved = await tx.query(
-      `UPDATE documents SET status = 'awaiting_offset', offset_segments = $2, offset_agreement = $3
+      `UPDATE documents SET status = 'awaiting_offset', offset_segments = $2, offset_agreement = $3,
+         offset_confirmed_at = CASE WHEN $4 THEN now() END
        WHERE id = $1 AND status = 'rendering'`,
-      [documentId, JSON.stringify(segments), fit.agreement],
+      [documentId, JSON.stringify(segments), fit.agreement, auto],
     );
-    if (moved.rowCount === 1 && auto) {
-      await startReading(deps, tx, documentId, segments);
-    }
+    if (moved.rowCount === 1) await admit(deps.boss, tx, doc.api_key_id);
   });
 }
 
