@@ -6,6 +6,7 @@ import {
   type ModelBlock,
   type ModelPage,
 } from "./blocks.ts";
+import type { ContentsEntry } from "../outline/draft.ts";
 import type { PageReader, RecordCall, SolvedAnswer } from "./reader.ts";
 
 export interface Script {
@@ -26,6 +27,10 @@ export interface Script {
    * "answer" for a blank).
    */
   solutions?: Record<string, SolvedAnswer>;
+  /** What each syllabus page's contents read as, by its place in the syllabus. Unlisted pages read as empty. */
+  contents?: Record<number, ContentsEntry[]>;
+  /** Syllabus pages whose contents read throws (every time). */
+  contentsFailures?: number[];
   record?: RecordCall;
 }
 
@@ -38,6 +43,8 @@ export interface ScriptedReader extends PageReader {
   pairReads: number[];
   /** Ids of the questions the model was asked to solve. */
   solves: string[];
+  /** Syllabus pages whose contents were read. */
+  contentsReads: number[];
 }
 
 export function scriptedReader(script: Script): ScriptedReader {
@@ -52,6 +59,16 @@ export function scriptedReader(script: Script): ScriptedReader {
     numberReads: [],
     pairReads: [],
     solves: [],
+    contentsReads: [],
+    readContents(image) {
+      reader.contentsReads.push(image.pdfPage);
+      if (script.contentsFailures?.includes(image.pdfPage)) {
+        return Promise.reject(
+          new Error(`scripted: contents page ${String(image.pdfPage)} fails`),
+        );
+      }
+      return Promise.resolve(script.contents?.[image.pdfPage] ?? []);
+    },
     readPrintedNumber(image) {
       reader.numberReads.push(image.pdfPage);
       const number = script.numbers?.[image.pdfPage];

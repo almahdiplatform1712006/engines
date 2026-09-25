@@ -2,6 +2,7 @@
 // asks a model goes through a PageReader. Two adapters: `createModelReader`
 // (Vercel AI SDK) and `scriptedReader` (tests and local runs without a key).
 import type { CropBox } from "../contract/crop.ts";
+import type { ContentsEntry } from "../outline/draft.ts";
 import type { Block, PageReading } from "./blocks.ts";
 
 export interface PageImage {
@@ -42,6 +43,14 @@ export interface PageReader {
     context: CallContext,
     figure?: PageImage,
   ): Promise<SolvedAnswer>;
+  /**
+   * Syllabus drafting (E-16): the entries of one contents page, in reading
+   * order. `image.pdfPage` is the page's place in the syllabus.
+   */
+  readContents(
+    image: PageImage,
+    context: CallContext,
+  ): Promise<ContentsEntry[]>;
 }
 
 /** A question for the model to solve, with its shared passage when it has one. */

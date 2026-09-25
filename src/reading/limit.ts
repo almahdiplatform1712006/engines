@@ -23,5 +23,6 @@ export function callLimiter(limit: number): (reader: PageReader) => PageReader {
     readPage: (...args) => run(() => reader.readPage(...args)),
     readPair: (...args) => run(() => reader.readPair(...args)),
     solve: (...args) => run(() => reader.solve(...args)),
+    readContents: (...args) => run(() => reader.readContents(...args)),
   });
 }

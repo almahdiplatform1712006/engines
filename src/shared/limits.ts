@@ -11,3 +11,5 @@ export const DOCUMENT_TTL_DAYS = 30;
 export const UPLOAD_TTL_DAYS = 2;
 /** An `Idempotency-Key` is remembered this long. */
 export const IDEMPOTENCY_TTL_MS = DAY_MS;
+/** A syllabus drafts from at most this many pages (one model call each). */
+export const MAX_SYLLABUS_PAGES = 30;

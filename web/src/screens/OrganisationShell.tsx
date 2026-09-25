@@ -3,32 +3,57 @@ import { useI18n } from "../i18n.tsx";
 import { Link } from "../router.tsx";
 import { Keys } from "./Keys.tsx";
 import { Members } from "./Members.tsx";
+import { NewBook } from "./NewBook.tsx";
+import { OutlineEditor } from "./OutlineEditor.tsx";
 import { Usage } from "./Usage.tsx";
 
-export interface Organisation {
-  id: string;
-  name: string;
-  role: string;
-}
+export type Organisation = Me["organisations"][number];
 
-const SCREENS = ["keys", "members", "usage"] as const;
+const TABS = ["new", "keys", "members", "usage"] as const;
 
 export function OrganisationShell(props: {
   me: Me;
   organisation: Organisation;
   screen: string;
+  rest: string[];
 }) {
   const { t } = useI18n();
   const { organisation } = props;
-  const labels: Record<(typeof SCREENS)[number], string> = {
+  const labels: Record<(typeof TABS)[number], string> = {
+    new: t.newBook,
     keys: t.keys,
     members: t.members,
     usage: t.usage,
   };
+  // Keyed by organisation: nothing on a screen carries over to the next one.
+  const key = organisation.id;
+  let screen: React.ReactNode;
+  switch (props.screen) {
+    case "new":
+      screen = <NewBook key={key} organisation={organisation} />;
+      break;
+    case "outlines":
+      screen = (
+        <OutlineEditor
+          key={`${key}/${props.rest[0] ?? ""}`}
+          organisation={organisation}
+          outlineId={props.rest[0] ?? ""}
+        />
+      );
+      break;
+    case "members":
+      screen = <Members key={key} organisation={organisation} />;
+      break;
+    case "usage":
+      screen = <Usage key={key} organisation={organisation} />;
+      break;
+    default:
+      screen = <Keys key={key} organisation={organisation} />;
+  }
   return (
     <div className="shell">
       <nav className="tabs" aria-label={organisation.name}>
-        {SCREENS.map((s) => (
+        {TABS.map((s) => (
           <Link
             key={s}
             to={`/o/${organisation.id}/${s}`}
@@ -38,14 +63,7 @@ export function OrganisationShell(props: {
           </Link>
         ))}
       </nav>
-      {/* Keyed by organisation: nothing on a screen carries over to the next one. */}
-      {props.screen === "members" ? (
-        <Members key={organisation.id} organisation={organisation} />
-      ) : props.screen === "usage" ? (
-        <Usage key={organisation.id} organisation={organisation} />
-      ) : (
-        <Keys key={organisation.id} organisation={organisation} />
-      )}
+      {screen}
     </div>
   );
 }

@@ -15,9 +15,9 @@ import {
 } from "../contract/outline.ts";
 import { createDocument, type Created } from "../documents/create.ts";
 import { documentView, liveDocument } from "../documents/store.ts";
+import { startOutline } from "../outline/start.ts";
 import {
   confirmOutline,
-  createOutline,
   getOutline,
   outlineView,
   replaceOutline,
@@ -140,25 +140,26 @@ export function createApp(deps: AppDeps): Hono {
   v1.post("/outlines", async (c) => {
     const body = await readBody(c, CreateOutlineRequest);
     const response = await once(c, "POST /v1/outlines", body, async () => {
-      const nodes = normaliseTree(body.source.nodes);
-      const outline = await createOutline(
-        db,
-        clock,
-        c.var.caller.orgId,
-        { type: body.source.type },
-        nodes,
-      );
-      return { status: 201, body: outlineView(outline) };
+      const outline = await startOutline(deps, c.var.caller, body);
+      return { status: 201, body: await outlineView(store, outline) };
     });
+    // A repeat returns the outline as it is now (drafting moves on).
+    if (response.replayed) {
+      const { id } = response.body as { id: string };
+      return c.json(await currentOutline(c.var.caller.orgId, id), 201);
+    }
     return c.json(response.body, response.status as 201);
   });
 
-  v1.get("/outlines/:id", async (c) => {
-    const outline = await getOutline(db, c.var.caller.orgId, c.req.param("id"));
-    if (!outline)
-      throw new Refusal("not_found", `No outline ${c.req.param("id")}.`);
-    return c.json(outlineView(outline));
-  });
+  const currentOutline = async (orgId: string, id: string) => {
+    const outline = await getOutline(db, orgId, id);
+    if (!outline) throw new Refusal("not_found", `No outline ${id}.`);
+    return outlineView(store, outline);
+  };
+
+  v1.get("/outlines/:id", async (c) =>
+    c.json(await currentOutline(c.var.caller.orgId, c.req.param("id"))),
+  );
 
   v1.put("/outlines/:id", async (c) => {
     const body = await readBody(c, ReplaceOutlineRequest);
@@ -169,7 +170,7 @@ export function createApp(deps: AppDeps): Hono {
       c.req.param("id"),
       normaliseTree(body.nodes),
     );
-    return c.json(outlineView(outline));
+    return c.json(await outlineView(store, outline));
   });
 
   v1.post("/outlines/:id/confirm", async (c) => {
@@ -179,7 +180,7 @@ export function createApp(deps: AppDeps): Hono {
       c.var.caller.orgId,
       c.req.param("id"),
     );
-    return c.json(outlineView(outline));
+    return c.json(await outlineView(store, outline));
   });
 
   v1.post("/documents", async (c) => {

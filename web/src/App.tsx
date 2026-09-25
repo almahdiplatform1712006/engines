@@ -68,6 +68,7 @@ export function App() {
           me={me}
           organisation={organisation}
           screen={match.screen}
+          rest={match.rest}
         />
       ) : (
         <p className="muted">

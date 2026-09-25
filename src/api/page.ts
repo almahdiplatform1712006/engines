@@ -34,8 +34,15 @@ export function pageRoutes(
 
   page.get("/me", async (c) => {
     const { user, active } = c.var.session;
-    const { rows } = await db.query<{ id: string; name: string; role: string }>(
-      `SELECT o.id, o.name, m.role FROM members m JOIN organisations o ON o.id = m.org_id
+    const { rows } = await db.query<{
+      id: string;
+      name: string;
+      role: string;
+      entitlements: string[];
+    }>(
+      `SELECT o.id, o.name, m.role,
+         ARRAY(SELECT e.name FROM entitlements e WHERE e.org_id = o.id ORDER BY e.name) AS entitlements
+       FROM members m JOIN organisations o ON o.id = m.org_id
        WHERE m.user_id = $1 ORDER BY m.created_at, o.id`,
       [user.id],
     );

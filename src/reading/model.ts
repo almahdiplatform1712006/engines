@@ -10,7 +10,10 @@ import {
 } from "ai";
 import { z } from "zod";
 import { ModelBlock, ModelPage, toBlock, toPageReading } from "./blocks.ts";
+import type { ContentsEntry } from "../outline/draft.ts";
+import { parsePrintedNumber } from "../shared/text.ts";
 import {
+  READ_CONTENTS,
   READ_NUMBER,
   READ_PAGE,
   readPair,
@@ -65,6 +68,33 @@ const PrintedNumber = z.object({
     .nullable()
     .describe("The printed page number exactly as printed, or null"),
 });
+
+const ContentsPage = z.object({
+  entries: z.array(
+    z.object({
+      name: z.string(),
+      depth: z.int().min(1).max(8),
+      level: z.string().nullable(),
+      page: z.string().nullable().describe("Start page exactly as printed"),
+      page_to: z.string().nullable().describe("End page, only for a range"),
+      answer_key: z.boolean(),
+    }),
+  ),
+});
+
+/** The model's reading of a contents page, page numbers parsed. */
+export function toContentsEntries(
+  page: z.output<typeof ContentsPage>,
+): ContentsEntry[] {
+  return page.entries.map((e) => ({
+    name: e.name,
+    depth: e.depth,
+    level: e.level,
+    from: parsePrintedNumber(e.page),
+    to: parsePrintedNumber(e.page_to),
+    answerKey: e.answer_key,
+  }));
+}
 
 export class TruncatedOutputError extends Error {
   override name = "TruncatedOutputError";
@@ -204,6 +234,18 @@ export function createModelReader(options: ModelReaderOptions): PageReader {
             ]
           : []),
       ]);
+    },
+    async readContents(image, context) {
+      const page = await call(
+        options.main,
+        "read_contents",
+        image.pdfPage,
+        context,
+        ContentsPage,
+        READ_CONTENTS,
+        [{ type: "image", image: image.bytes, mediaType: image.mediaType }],
+      );
+      return toContentsEntries(page);
     },
     async readPage(image, context) {
       const page = await call(

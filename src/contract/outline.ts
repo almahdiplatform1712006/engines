@@ -1,6 +1,7 @@
 // `/v1/` outline shapes (spec #1 §3). The editor on Engines' page and the API
 // both read these, so a node means the same thing everywhere.
 import { z } from "zod";
+import { MAX_SYLLABUS_PAGES } from "../shared/limits.ts";
 
 export const PrintedRange = z.object({
   from: z.int().min(1),
@@ -79,12 +80,39 @@ export type OutlineIssue = z.infer<typeof OutlineIssue>;
 export const OutlineStatus = z.enum(["draft", "confirmed", "in_use"]);
 export type OutlineStatus = z.infer<typeof OutlineStatus>;
 
+const UploadId = z.string().min(1);
+
+/**
+ * Where a tree starts (spec §1 step 2):
+ * - `manual`: the tree itself. A starting tree from another platform is one
+ *   too, its nodes carrying `external_ref`; ranges may come later.
+ * - `pdf`, `images` (in order), `book_pages` (the contents pages inside the
+ *   book, as PDF pages): a syllabus the model drafts a tree from, one call
+ *   per page. The book's `upload_id` is later sent to `POST /v1/documents`.
+ */
 export const CreateOutlineRequest = z.object({
   source: z.discriminatedUnion("type", [
     z.object({
       type: z.literal("manual"),
       nodes: z.array(OutlineNodeInput).min(1),
     }),
+    z.object({ type: z.literal("pdf"), upload_id: UploadId }),
+    z.object({
+      type: z.literal("images"),
+      upload_ids: z.array(UploadId).min(1).max(MAX_SYLLABUS_PAGES),
+    }),
+    z
+      .object({
+        type: z.literal("book_pages"),
+        upload_id: UploadId,
+        from: z.int().min(1),
+        to: z.int().min(1),
+      })
+      .refine((s) => s.from <= s.to, "`from` must not be after `to`.")
+      .refine(
+        (s) => s.to - s.from < MAX_SYLLABUS_PAGES,
+        `A syllabus is at most ${String(MAX_SYLLABUS_PAGES)} pages.`,
+      ),
   ]),
 });
 export type CreateOutlineRequest = z.infer<typeof CreateOutlineRequest>;
@@ -93,10 +121,26 @@ export const ReplaceOutlineRequest = z.object({
   nodes: z.array(OutlineNodeInput).min(1),
 });
 
+/** How far drafting a tree from a syllabus has got. */
+export const OutlineDrafting = z.object({
+  status: z.enum(["running", "done", "failed"]),
+  pages: z.int(),
+  pages_read: z.int(),
+  /** Syllabus pages that couldn't be read; the tree is drafted from the rest. */
+  failures: z.array(z.object({ page: z.int(), reason: z.string() })),
+});
+export type OutlineDrafting = z.infer<typeof OutlineDrafting>;
+
 export const Outline = z.object({
   id: z.string(),
   object: z.literal("outline"),
   status: OutlineStatus,
+  /** Null for a tree that was sent; otherwise drafting's progress. */
+  drafting: OutlineDrafting.nullable(),
+  /** The syllabus pages, as images, for checking the tree against. */
+  source_pages: z.array(
+    z.object({ page: z.int(), image_url: z.string().nullable() }),
+  ),
   nodes: z.array(OutlineNode),
   errors: z.array(OutlineIssue),
   warnings: z.array(OutlineIssue),

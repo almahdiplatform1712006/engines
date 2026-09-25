@@ -56,10 +56,14 @@ export async function expire(deps: PipelineDeps): Promise<ExpiryReport> {
     });
   }
 
-  const outlines = await deps.db.query(
-    "DELETE FROM outlines WHERE status IN ('draft', 'confirmed') AND expires_at <= $1",
+  const outlines = await deps.db.query<{ id: string }>(
+    "DELETE FROM outlines WHERE status IN ('draft', 'confirmed') AND expires_at <= $1 RETURNING id",
     [now],
   );
+  // Their syllabus page images go with them.
+  for (const { id } of outlines.rows) {
+    await deps.store.deletePrefix(`pages/outlines/${id}/`);
+  }
 
   const uploads = await deps.db.query<{ id: string; storage_key: string }>(
     "SELECT id, storage_key FROM uploads WHERE document_id IS NULL AND expires_at <= $1",

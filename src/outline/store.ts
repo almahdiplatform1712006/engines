@@ -1,9 +1,11 @@
 // Outlines in Postgres: a row per outline and a row per node (spec #1 §6).
 import type {
   Outline,
+  OutlineDrafting,
   OutlineNode,
   OutlineStatus,
 } from "../contract/outline.ts";
+import type { BlobStore } from "../storage/store.ts";
 import { addDays, type Clock } from "../shared/clock.ts";
 import type { Db, Queryable } from "../shared/db/pool.ts";
 import { newId } from "../shared/ids.ts";
@@ -13,11 +15,29 @@ import { validateOutline, walk } from "./tree.ts";
 /** A draft or unused confirmed outline expires after this many days (spec §3). */
 export const OUTLINE_TTL_DAYS = 30;
 
+/** Where an outline's syllabus is, as stored in `outlines.source`. */
+export type SyllabusSource =
+  | { type: "pdf"; upload_id: string; storage_key: string }
+  | { type: "images"; upload_ids: string[]; storage_keys: string[] }
+  | {
+      type: "book_pages";
+      upload_id: string;
+      storage_key: string;
+      from: number;
+      to: number;
+    };
+
+/** How long the syllabus page links in an outline last. */
+const SOURCE_URL_SECONDS = 60 * 60;
+
 export interface StoredOutline {
   id: string;
   orgId: string;
   status: OutlineStatus;
   nodes: OutlineNode[];
+  drafting: OutlineDrafting | null;
+  /** The syllabus pages, in order, with their images once rendered. */
+  sourcePages: { page: number; imageKey: string | null }[];
   createdAt: Date;
   expiresAt: Date;
 }
@@ -26,8 +46,16 @@ interface OutlineRow {
   id: string;
   org_id: string;
   status: OutlineStatus;
+  drafting: OutlineDrafting["status"] | null;
   created_at: Date;
   expires_at: Date;
+}
+
+interface PageRow {
+  page: number;
+  image_key: string | null;
+  state: "pending" | "read" | "failed";
+  failure: string | null;
 }
 
 interface NodeRow {
@@ -41,12 +69,25 @@ interface NodeRow {
   external_ref: string | null;
 }
 
-export function outlineView(outline: StoredOutline): Outline {
+export async function outlineView(
+  store: BlobStore,
+  outline: StoredOutline,
+): Promise<Outline> {
   const { errors, warnings } = validateOutline(outline.nodes);
+  const sourcePages = await Promise.all(
+    outline.sourcePages.map(async ({ page, imageKey }) => ({
+      page,
+      image_url: imageKey
+        ? await store.signedUrl(imageKey, SOURCE_URL_SECONDS)
+        : null,
+    })),
+  );
   return {
     id: outline.id,
     object: "outline",
     status: outline.status,
+    drafting: outline.drafting,
+    source_pages: sourcePages,
     nodes: outline.nodes,
     errors,
     warnings,
@@ -55,26 +96,52 @@ export function outlineView(outline: StoredOutline): Outline {
   };
 }
 
+export interface NewOutline {
+  orgId: string;
+  apiKeyId: string;
+  source: unknown;
+  nodes: OutlineNode[];
+  /** A syllabus to draft from: its page count. The tree starts empty. */
+  syllabusPages?: number;
+}
+
+/**
+ * Stores a new draft outline. With a syllabus, it starts drafting; `then`
+ * runs in the same transaction (to queue the drafting job).
+ */
 export async function createOutline(
   db: Db,
   clock: Clock,
-  orgId: string,
-  source: unknown,
-  nodes: OutlineNode[],
+  outline: NewOutline,
+  then?: (tx: Queryable, id: string) => Promise<void>,
 ): Promise<StoredOutline> {
   const id = newId("out");
   const now = clock();
+  const drafting = outline.syllabusPages === undefined ? null : "running";
   await db.transaction(async (tx) => {
     await tx.query(
-      `INSERT INTO outlines (id, org_id, status, source, created_at, updated_at, expires_at)
-       VALUES ($1, $2, 'draft', $3, $4, $4, $5)`,
-      [id, orgId, JSON.stringify(source), now, addDays(now, OUTLINE_TTL_DAYS)],
+      `INSERT INTO outlines (id, org_id, api_key_id, status, drafting, source, created_at, updated_at, expires_at)
+       VALUES ($1, $2, $3, 'draft', $4, $5, $6, $6, $7)`,
+      [
+        id,
+        outline.orgId,
+        outline.apiKeyId,
+        drafting,
+        JSON.stringify(outline.source),
+        now,
+        addDays(now, OUTLINE_TTL_DAYS),
+      ],
     );
-    await writeNodes(tx, id, orgId, nodes);
+    await writeNodes(tx, id, outline.orgId, outline.nodes);
+    for (let page = 1; page <= (outline.syllabusPages ?? 0); page++) {
+      await tx.query(
+        "INSERT INTO outline_pages (outline_id, org_id, page) VALUES ($1, $2, $3)",
+        [id, outline.orgId, page],
+      );
+    }
+    await then?.(tx, id);
   });
-  const outline = await getOutline(db, orgId, id);
-  if (!outline) throw new Error("outline vanished after insert");
-  return outline;
+  return mustGet(db, outline.orgId, id);
 }
 
 /** The organisation's outline, or null when it doesn't exist or belongs to someone else. */
@@ -84,7 +151,7 @@ export async function getOutline(
   id: string,
 ): Promise<StoredOutline | null> {
   const { rows } = await db.query<OutlineRow>(
-    "SELECT id, org_id, status, created_at, expires_at FROM outlines WHERE id = $1 AND org_id = $2",
+    "SELECT id, org_id, status, drafting, created_at, expires_at FROM outlines WHERE id = $1 AND org_id = $2",
     [id, orgId],
   );
   const row = rows[0];
@@ -94,11 +161,27 @@ export async function getOutline(
      FROM outline_nodes WHERE outline_id = $1 ORDER BY position`,
     [id],
   );
+  const pages = await db.query<PageRow>(
+    "SELECT page, image_key, state, failure FROM outline_pages WHERE outline_id = $1 ORDER BY page",
+    [id],
+  );
   return {
     id: row.id,
     orgId: row.org_id,
     status: row.status,
     nodes: buildTree(nodes.rows),
+    drafting: row.drafting && {
+      status: row.drafting,
+      pages: pages.rows.length,
+      pages_read: pages.rows.filter((p) => p.state !== "pending").length,
+      failures: pages.rows
+        .filter((p) => p.state === "failed")
+        .map((p) => ({ page: p.page, reason: p.failure ?? "unreadable" })),
+    },
+    sourcePages: pages.rows.map((p) => ({
+      page: p.page,
+      imageKey: p.image_key,
+    })),
     createdAt: row.created_at,
     expiresAt: row.expires_at,
   };
@@ -167,18 +250,60 @@ export async function markInUse(db: Queryable, id: string): Promise<void> {
   );
 }
 
+/** Locks the outline for a change; refused while its tree is still being drafted. */
 async function lockStatus(
   tx: Queryable,
   orgId: string,
   id: string,
 ): Promise<OutlineStatus> {
-  const { rows } = await tx.query<{ status: OutlineStatus }>(
-    "SELECT status FROM outlines WHERE id = $1 AND org_id = $2 FOR UPDATE",
+  const { rows } = await tx.query<{
+    status: OutlineStatus;
+    drafting: string | null;
+  }>(
+    "SELECT status, drafting FROM outlines WHERE id = $1 AND org_id = $2 FOR UPDATE",
     [id, orgId],
   );
   const row = rows[0];
   if (!row) throw new Refusal("not_found", `No outline ${id}.`);
+  if (row.drafting === "running") {
+    throw new Refusal(
+      "wrong_state",
+      `Outline ${id} is still being drafted from its syllabus; try again when drafting is done.`,
+    );
+  }
   return row.status;
+}
+
+/**
+ * Drafting's end: the drafted tree replaces the empty draft (nobody can edit
+ * it while drafting runs). `failed` when no page could be read.
+ */
+export async function finishDrafting(
+  db: Db,
+  clock: Clock,
+  id: string,
+  nodes: OutlineNode[],
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const { rows } = await tx.query<{
+      org_id: string;
+      drafting: string | null;
+      read: number;
+    }>(
+      `SELECT org_id, drafting,
+         (SELECT count(*)::int FROM outline_pages p WHERE p.outline_id = o.id AND p.state = 'read') AS read
+       FROM outlines o WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const row = rows[0];
+    if (row?.drafting !== "running") return;
+    await tx.query("DELETE FROM outline_nodes WHERE outline_id = $1", [id]);
+    await writeNodes(tx, id, row.org_id, nodes);
+    await tx.query(
+      "UPDATE outlines SET drafting = $2, updated_at = $3 WHERE id = $1",
+      [id, row.read > 0 ? "done" : "failed", clock()],
+    );
+  });
 }
 
 async function mustGet(

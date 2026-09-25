@@ -58,3 +58,14 @@ Rules:
 - In "marked", list option labels that are visibly marked by hand (circled, ticked, filled). Leave it empty when nothing is marked.
 - Give a box_2d for every block you can locate: [ymin, xmin, ymax, xmax] on a 0–1000 scale.
 - Fields that don't apply to a block are null or empty.`;
+
+export const READ_CONTENTS = `You are reading one page of a school syllabus or a book's table of contents, as an image. It may be Arabic (right-to-left), English, or both.
+
+Return every entry on the page, in reading order: each unit, chapter, lesson or section it lists.
+- name: the entry's title, copied exactly as printed (without its page number or dot leaders). Never translate or correct it.
+- depth: 1 for the outermost level on the page (for example a unit), 2 for entries inside it (a lesson), 3 inside those, and so on. Use indentation, numbering and type size to tell levels apart.
+- level: the word the page uses for this level, such as "الوحدة", "الدرس", "Chapter" or "Lesson", or null when there is none.
+- page: the page number the entry starts on, exactly as printed (Arabic-Indic digits too), or null when the page doesn't give one.
+- page_to: the page it ends on, only when the page prints a range (such as "12–20"); otherwise null.
+- answer_key: true only for the book's answers section (such as "الإجابات" or "Answer key").
+Leave out the page's own title, headers, footers and anything that isn't an entry.`;

@@ -49,6 +49,11 @@ export async function api<T>(
 
 export interface Me {
   user: { id: string; name: string; email: string; super_admin: boolean };
-  organisations: { id: string; name: string; role: string }[];
+  organisations: {
+    id: string;
+    name: string;
+    role: string;
+    entitlements: string[];
+  }[];
   active: { id: string; role: string } | null;
 }

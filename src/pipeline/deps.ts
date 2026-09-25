@@ -19,6 +19,8 @@ export const queues = {
   taskDead: "document.task.dead",
   advance: "document.advance",
   advanceDead: "document.advance.dead",
+  draftOutline: "outline.draft",
+  draftOutlineDead: "outline.draft.dead",
 } as const;
 
 export interface PipelineDeps {
@@ -67,6 +69,9 @@ export interface PageJob {
   documentId: string;
   pdfPage: number;
 }
+export interface OutlineJob {
+  outlineId: string;
+}
 export interface TaskJob {
   documentId: string;
   stage: "pair" | "solve";
@@ -87,6 +92,7 @@ export async function createQueues(
     queues.readPageDead,
     queues.taskDead,
     queues.advanceDead,
+    queues.draftOutlineDead,
   ]) {
     await boss.createQueue(dead, {
       retryLimit: 5,
@@ -113,6 +119,13 @@ export async function createQueues(
       deadLetter,
     });
   }
+  await boss.createQueue(queues.draftOutline, {
+    retryLimit: 2,
+    retryDelay: options.retryDelay,
+    retryBackoff: true,
+    expireInSeconds: 1800,
+    deadLetter: queues.draftOutlineDead,
+  });
   await createWebhookQueue(boss, options.webhookRetryDelay);
   // One advance per document runs at a time, and one more may wait behind it
   // (`stately`: one job per state per singleton key). A task settling while

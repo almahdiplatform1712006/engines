@@ -6,7 +6,12 @@ import {
   getDocument,
   PDFDataRangeTransport,
 } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Refusal } from "../shared/refusal.ts";
 import type { BlobStore } from "../storage/store.ts";
+import { pageCount as popplerPageCount } from "./render.ts";
 
 class StoreRanges extends PDFDataRangeTransport {
   private readonly read: (begin: number, end: number) => Promise<Buffer>;
@@ -70,5 +75,32 @@ export async function countPdfPages(
   } finally {
     clearTimeout(timer);
     await task.destroy();
+  }
+}
+
+/**
+ * A stored PDF's pages, counted with pdf.js (byte ranges only), or, when
+ * pdf.js can't read it, downloaded and counted by poppler. A file neither can
+ * read is refused.
+ */
+export async function countStoredPdf(
+  store: BlobStore,
+  key: string,
+): Promise<number> {
+  const size = await store.size(key);
+  const counted = size === null ? null : await countPdfPages(store, key, size);
+  if (counted !== null) return counted;
+  const dir = await mkdtemp(join(tmpdir(), "engines-count-"));
+  try {
+    const file = join(dir, "book.pdf");
+    await writeFile(file, await store.get(key));
+    return await popplerPageCount(file);
+  } catch {
+    throw new Refusal(
+      "unsupported_file",
+      "This file isn't a PDF Engines can read.",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }

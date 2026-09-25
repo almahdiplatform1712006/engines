@@ -21,13 +21,22 @@ export function usePath(): string {
   return path;
 }
 
-/** `/o/:orgId/:screen` → its parts. */
+/** `/o/:orgId/:screen/…rest` → its parts. */
 export function matchOrg(
   path: string,
-): { orgId: string; screen: string } | null {
-  const match = /^\/o\/([^/]+)(?:\/([^/]+))?/.exec(path);
-  if (!match?.[1]) return null;
-  return { orgId: safeDecode(match[1]), screen: match[2] ?? "keys" };
+): { orgId: string; screen: string; rest: string[] } | null {
+  const [o, orgId, screen, ...rest] = path.split("/").filter((s) => s !== "");
+  if (o !== "o" || !orgId) return null;
+  return {
+    orgId: safeDecode(orgId),
+    screen: screen ?? "keys",
+    rest: rest.map(safeDecode),
+  };
+}
+
+/** A query parameter of the current URL. */
+export function query(name: string): string | null {
+  return new URLSearchParams(location.search).get(name);
 }
 
 export function Link(props: {

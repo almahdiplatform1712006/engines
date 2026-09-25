@@ -120,3 +120,70 @@ test("a pair re-read sends both images and returns the joined block on the first
   assert.ok(Array.isArray(content));
   assert.equal(content.filter((part) => part.type === "file").length, 2);
 });
+
+test("a contents page: entries in order, printed page numbers parsed from any digits", async () => {
+  const { reader: r, calls } = reader([
+    {
+      text: JSON.stringify({
+        entries: [
+          {
+            name: "الوحدة الأولى: الحركة",
+            depth: 1,
+            level: "الوحدة",
+            page: "٥",
+            page_to: null,
+            answer_key: false,
+          },
+          {
+            name: "الدرس الأول",
+            depth: 2,
+            level: "الدرس",
+            page: "۱۲",
+            page_to: "١٩",
+            answer_key: false,
+          },
+          {
+            name: "الإجابات",
+            depth: 1,
+            level: null,
+            page: "iv",
+            page_to: null,
+            answer_key: true,
+          },
+        ],
+      }),
+    },
+  ]);
+  const entries = await r.readContents(image, {
+    orgId: "org_1",
+    documentId: null,
+  });
+  assert.deepEqual(entries, [
+    {
+      name: "الوحدة الأولى: الحركة",
+      depth: 1,
+      level: "الوحدة",
+      from: 5,
+      to: null,
+      answerKey: false,
+    },
+    {
+      name: "الدرس الأول",
+      depth: 2,
+      level: "الدرس",
+      from: 12,
+      to: 19,
+      answerKey: false,
+    },
+    // A Roman numeral isn't a page the tree can use.
+    {
+      name: "الإجابات",
+      depth: 1,
+      level: null,
+      from: null,
+      to: null,
+      answerKey: true,
+    },
+  ]);
+  assert.equal(calls[0]?.purpose, "read_contents");
+});

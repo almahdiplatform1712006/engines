@@ -112,6 +112,7 @@ form {
 
 form.row,
 .row {
+  display: flex;
   flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
@@ -296,4 +297,225 @@ input.number {
   direction: ltr;
   inline-size: 5.5rem;
   text-align: center;
+}
+
+/* New book */
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-block: 0 1rem;
+  margin-inline: 0;
+  min-inline-size: 0;
+}
+
+legend {
+  font-weight: bold;
+  padding-inline: 0.25rem;
+}
+
+label.choice {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding-block: 0.3rem;
+}
+
+label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.block {
+  display: block;
+}
+
+.dropzone {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  margin-block-end: 1rem;
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.dropzone.over {
+  border-color: var(--accent);
+  background: var(--notice);
+}
+
+.button-like {
+  display: inline-block;
+  padding-block: 0.45rem;
+  padding-inline: 1rem;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.list.files li {
+  overflow-wrap: anywhere;
+}
+
+.progress-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+}
+
+progress {
+  inline-size: 100%;
+  max-inline-size: 20rem;
+}
+
+.warning {
+  color: #8a5a00;
+  margin: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .warning {
+    color: #f0c060;
+  }
+}
+
+button.small {
+  padding-block: 0.15rem;
+  padding-inline: 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* Tree editor: the tree, then the syllabus beside it (below it when narrow) */
+.editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 60rem) {
+  .editor-layout {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+
+  main:has(.editor-layout) {
+    max-inline-size: 90rem;
+  }
+
+  .source {
+    position: sticky;
+    inset-block-start: 1rem;
+    max-block-size: calc(100vh - 2rem);
+    overflow-y: auto;
+  }
+}
+
+.source img {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  margin-block-end: 0.75rem;
+  border: 1px solid var(--line);
+}
+
+.tree {
+  margin-block: 0.75rem;
+}
+
+.tree-node {
+  border-block-start: 2px solid transparent;
+  border-block-end: 1px solid var(--line);
+  padding-block: 0.4rem;
+}
+
+.tree-node.drop-above {
+  border-block-start-color: var(--accent);
+}
+
+.tree-node.drop-below {
+  border-block-end: 2px solid var(--accent);
+}
+
+.tree-node.drop-inside {
+  background: var(--notice);
+}
+
+.tree-node[aria-level="2"] .node-fields,
+.tree-node[aria-level="3"] .node-fields,
+.tree-node[aria-level="4"] .node-fields {
+  border-inline-start: 2px solid var(--line);
+  padding-inline-start: 0.5rem;
+}
+
+.tree-node.has-error {
+  border-inline-start: 3px solid var(--danger);
+}
+
+.node-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  padding-inline: 0.25rem;
+  user-select: none;
+  touch-action: none;
+}
+
+.node-name {
+  flex: 1 1 10rem;
+}
+
+.node-level {
+  flex: 0 1 7rem;
+  inline-size: 7rem;
+}
+
+.range {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.range input.number {
+  inline-size: 3.5rem;
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.node-actions {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.issues {
+  margin-block: 0.25rem 0;
+  padding-inline-start: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.toolbar,
+.status-line {
+  margin-block: 0.75rem;
 }

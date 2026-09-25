@@ -3,7 +3,7 @@
 import { serve } from "@hono/node-server";
 import { createServer, type AddressInfo } from "node:net";
 import { existsSync } from "node:fs";
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type Page } from "playwright-core";
 import { chromiumPath } from "../src/exports/pdf.ts";
 import { scriptedReader } from "../src/reading/scripted.ts";
 import { startHarness, type Harness, type HarnessOptions } from "./harness.ts";
@@ -53,4 +53,45 @@ export async function startPage(
       await h.close();
     },
   };
+}
+
+/** A signed-in page at 400 px for a new person and organisation. */
+export async function signedIn(
+  p: PageHarness,
+  email: string,
+  organisation = "مدرسة",
+): Promise<{ page: Page; orgId: string }> {
+  const context = await p.browser.newContext({
+    viewport: { width: 400, height: 900 },
+    baseURL: p.url,
+  });
+  const headers = { origin: p.url };
+  const signUp = await context.request.post("/api/auth/sign-up/email", {
+    headers,
+    data: { email, password: "a long enough password", name: email },
+  });
+  if (!signUp.ok()) throw new Error(`sign-up: ${await signUp.text()}`);
+  const org = await context.request.post("/api/auth/organization/create", {
+    headers,
+    data: { name: organisation, slug: `org-${String(Date.now())}` },
+  });
+  if (!org.ok()) throw new Error(`organisation: ${await org.text()}`);
+  const { id } = (await org.json()) as { id: string };
+  return { page: await context.newPage(), orgId: id };
+}
+
+/** Fails when anything on the page is wider than the window. */
+export async function assertFitsWidth(page: Page): Promise<void> {
+  // A string, so the root tsconfig (no DOM types) doesn't check browser code.
+  const overflow = await page.evaluate<number>(
+    "document.documentElement.scrollWidth - window.innerWidth",
+  );
+  if (overflow > 0) {
+    throw new Error(`${page.url()} spills ${String(overflow)}px sideways`);
+  }
+  const dir = process.env["SCREENSHOT_DIR"];
+  if (dir) {
+    const name = `${String(Date.now())}-${new URL(page.url()).pathname.replace(/\W+/g, "_")}.png`;
+    await page.screenshot({ path: `${dir}/${name}`, fullPage: true });
+  }
 }

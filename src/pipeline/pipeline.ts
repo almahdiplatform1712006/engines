@@ -15,12 +15,14 @@ import {
   DEFAULT_OPTIONS,
   queues,
   type DocumentJob,
+  type OutlineJob,
   type PageJob,
   type PipelineDeps,
   type PipelineOptions,
   type TaskJob,
 } from "./deps.ts";
 import { readPage, settlePage } from "./read.ts";
+import { draftingDied, draftOutline } from "./syllabus.ts";
 import { render } from "./render.ts";
 import { sweep, SWEEP_QUEUE } from "./sweep.ts";
 import {
@@ -79,6 +81,12 @@ export async function registerPipeline(
   });
   await boss.work<DocumentJob>(queues.advance, poll, async ([job]) => {
     if (job) await advance(deps, job.data.documentId);
+  });
+  await boss.work<OutlineJob>(queues.draftOutline, poll, async ([job]) => {
+    if (job) await draftOutline(deps, job.data.outlineId);
+  });
+  await boss.work<OutlineJob>(queues.draftOutlineDead, poll, async ([job]) => {
+    if (job) await draftingDied(deps, job.data.outlineId);
   });
   // The sweep runs every minute on whichever worker picks it up.
   await boss.createQueue(SWEEP_QUEUE, { policy: "singleton", retryLimit: 0 });
