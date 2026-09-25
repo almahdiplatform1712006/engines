@@ -6,6 +6,7 @@ import {
   readApiConfig,
   readDatabaseConfig,
   readStorageConfig,
+  readExportConfig,
   readWebhookPolicy,
 } from "../shared/config.ts";
 import { connect } from "../shared/db/pool.ts";
@@ -33,6 +34,7 @@ const app = createApp({
   store: storeFromConfig(readStorageConfig(process.env)),
   clock: systemClock,
   webhooks: readWebhookPolicy(process.env),
+  chromiumPath: readExportConfig(process.env).chromiumPath,
 });
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`api listening on :${String(info.port)}`);

@@ -157,3 +157,12 @@ export function readWorkerConfig(env: Env): WorkerConfig {
     chunking: { maxTokens: e.CHUNK_MAX_TOKENS, minTokens: e.CHUNK_MIN_TOKENS },
   };
 }
+
+const exportEnv = z.object({ CHROMIUM_PATH: optional });
+
+/** Where headless Chromium is, for PDF exports (found on the usual paths when unset). */
+export function readExportConfig(env: Env): {
+  chromiumPath: string | undefined;
+} {
+  return { chromiumPath: parse(exportEnv, env).CHROMIUM_PATH };
+}

@@ -38,3 +38,26 @@ export function parsesInKatex(span: MathSpan): boolean {
 export function latexValid(text: string): boolean {
   return mathSpans(text).every(parsesInKatex);
 }
+
+export type Piece =
+  | { kind: "text"; text: string }
+  | { kind: "math"; tex: string; display: boolean };
+
+/** Text cut into plain runs and math spans, in order. */
+export function splitMath(text: string): Piece[] {
+  const pieces: Piece[] = [];
+  let at = 0;
+  for (const match of text.matchAll(MATH_SPAN)) {
+    const [whole, display, bracket, paren, inline] = match;
+    const index = match.index;
+    if (index > at) pieces.push({ kind: "text", text: text.slice(at, index) });
+    pieces.push({
+      kind: "math",
+      tex: display ?? bracket ?? paren ?? inline ?? "",
+      display: display !== undefined || bracket !== undefined,
+    });
+    at = index + whole.length;
+  }
+  if (at < text.length) pieces.push({ kind: "text", text: text.slice(at) });
+  return pieces;
+}

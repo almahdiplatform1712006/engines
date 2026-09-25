@@ -28,6 +28,12 @@ import type { BlobStore } from "../storage/store.ts";
 import type { TargetPolicy } from "../webhooks/target.ts";
 import { CreateUploadRequest, createUpload } from "../uploads/uploads.ts";
 import { webhookSecret } from "../webhooks/deliver.ts";
+import {
+  EXPORT_FORMATS,
+  exportDocument,
+  type ExportFormat,
+} from "../exports/export.ts";
+import { chromiumPath } from "../exports/pdf.ts";
 import { errorResponse, readBody, unauthorized } from "./errors.ts";
 import {
   IDEMPOTENCY_HEADER,
@@ -41,6 +47,8 @@ export interface AppDeps {
   store: BlobStore & { routes?: Hono };
   clock: Clock;
   webhooks: TargetPolicy;
+  /** The Chromium binary for PDF exports; found on the usual paths when unset. */
+  chromiumPath?: string | undefined;
 }
 
 interface Env {
@@ -176,6 +184,26 @@ export function createApp(deps: AppDeps): Hono {
     );
     const row = await liveDocument(db, c.var.caller.orgId, c.req.param("id"));
     return c.json(await documentView(db, store, row));
+  });
+
+  v1.get("/documents/:id/export", async (c) => {
+    const format = c.req.query("format") ?? "json";
+    if (!(EXPORT_FORMATS as readonly string[]).includes(format)) {
+      throw new Refusal(
+        "invalid_request",
+        `format must be one of ${EXPORT_FORMATS.join(", ")}.`,
+      );
+    }
+    const row = await liveDocument(db, c.var.caller.orgId, c.req.param("id"));
+    const file = await exportDocument(
+      { db, store, chromium: () => chromiumPath(deps.chromiumPath) },
+      row,
+      format as ExportFormat,
+    );
+    return c.body(new Uint8Array(file.bytes), 200, {
+      "content-type": file.contentType,
+      "content-disposition": `attachment; filename="${file.filename.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+    });
   });
 
   v1.get("/documents/:id", async (c) => {

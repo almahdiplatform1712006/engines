@@ -35,6 +35,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      # The pipeline's tests render real PDFs with poppler; exports print with
+      # the runner's Google Chrome.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
