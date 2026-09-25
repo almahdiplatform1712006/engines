@@ -1,6 +1,7 @@
 // `POST /v1/documents`: every check a new document passes before it is queued
 // (spec #1 §3), then the insert and admission in one transaction.
 import type { PgBoss } from "pg-boss";
+import { requireEntitlement } from "../accounts/entitlements.ts";
 import type { Caller } from "../accounts/keys.ts";
 import type { CreateDocumentRequest } from "../contract/document.ts";
 import { getOutline, markInUse } from "../outline/store.ts";
@@ -45,6 +46,9 @@ export async function createDocument(
     );
   }
 
+  if (request.type !== "questions") {
+    await requireEntitlement(db, caller.orgId, "explanation");
+  }
   const source = await resolveSource(deps, caller.orgId, request.source);
   const uploadIds =
     source.kind === "pdf"

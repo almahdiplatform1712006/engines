@@ -83,7 +83,7 @@ Nothing here connects to any Google Cloud database.
 Run a book through the engine locally (needs `AI_MODEL` and `OPENROUTER_API_KEY` in `.env`, and poppler on the host):
 
 ```sh
-npm run seed -- "My organisation"      # prints an API key
+npm run seed -- "My organisation"      # prints an API key (add --explanation for the entitlement)
 KEY=eng_…
 curl -s localhost:8080/v1/uploads -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
   -d '{"filename":"book.pdf","content_type":"application/pdf","size":'$(stat -c%s book.pdf)'}'

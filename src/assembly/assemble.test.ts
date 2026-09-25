@@ -122,6 +122,57 @@ describe("placement (E-05)", () => {
     assert.deepEqual(explanation.skipped, { neither: 2, off_type: 2 });
   });
 
+  test("explanation: heading-bounded chunks under their nodes, questions skipped", () => {
+    const result = run(
+      {
+        1: page("1", [
+          modelBlock({ kind: "heading", text: "القانون الأول" }),
+          modelBlock({ kind: "explanation", text: "يبقى الجسم ساكنا $F = 0$" }),
+          modelBlock({
+            kind: "passage",
+            stimulus_kind: "diagram",
+            text: "شكل",
+            box_2d: [100, 100, 300, 300],
+          }),
+          mcq("1", "سؤال"),
+        ]),
+        3: page("3", [
+          modelBlock({ kind: "explanation", text: "شرح الدرس الثاني" }),
+        ]),
+      },
+      { type: "explanation" },
+    );
+    assert.deepEqual(
+      result.explanation.map((c) => [
+        c.node_id,
+        c.heading,
+        c.figures.length,
+        c.pages.pdf,
+      ]),
+      [
+        ["l1", "القانون الأول", 1, [1]],
+        ["l2", "l2", 0, [3]],
+      ],
+    );
+    assert.equal(result.questions.length, 0);
+    assert.equal(result.skipped.off_type, 1);
+  });
+
+  test("both keeps questions and explanation apart", () => {
+    const result = run(
+      {
+        1: page("1", [
+          modelBlock({ kind: "explanation", text: "شرح" }),
+          mcq("1", "سؤال"),
+        ]),
+      },
+      { type: "both" },
+    );
+    assert.equal(result.questions.length, 1);
+    assert.equal(result.explanation.length, 1);
+    assert.equal(result.skipped.off_type, 0);
+  });
+
   test("blocks that are neither are counted, not dropped", () => {
     const result = run({
       1: page("1", [modelBlock({ kind: "neither" }), mcq("1", "a")]),

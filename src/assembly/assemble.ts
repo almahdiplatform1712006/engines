@@ -26,6 +26,8 @@ import {
   type AnswerEntry,
 } from "./answers.ts";
 import { flag, questionChecks } from "./checks.ts";
+import { chunkSections, type ChunkOptions, type Section } from "./chunks.ts";
+import { latexValid } from "../shared/latex.ts";
 import { headingNames } from "./placement.ts";
 import type { SolveRequest, SolvedAnswer } from "../reading/reader.ts";
 import type { TreeIndex } from "./tree-index.ts";
@@ -51,6 +53,7 @@ export interface AssemblyInput {
    * (step 7). When given, a question still without an answer is flagged.
    */
   solved?: ReadonlyMap<string, SolvedAnswer>;
+  chunking?: ChunkOptions;
 }
 
 /** Which block kinds each document type delivers. The rest are `off_type`. */
@@ -137,9 +140,21 @@ export function assemble(input: AssemblyInput): Assembly {
   const questionItems: { item: Placed; order: number }[] = [];
   const drafts: DraftStimulus[] = [];
   const stimulusOrder = new Map<string, number>();
+  const explanationOnly = input.type === "explanation";
+  const sections = new SectionBuilder(input.segments);
   placed.forEach((item, order) => {
     const kind = item.block.kind;
+    if (delivers.includes("explanation")) sections.add(item);
     if (kind === "heading") return;
+    // In an explanation document a diagram or table is a figure of its section.
+    if (
+      explanationOnly &&
+      kind === "passage" &&
+      item.block.stimulus?.kind !== "passage" &&
+      item.block.box !== null
+    )
+      return;
+    if (kind === "explanation" && delivers.includes(kind)) return;
     if (!delivers.includes(kind)) {
       result.skipped.off_type++;
       return;
@@ -229,9 +244,15 @@ export function assemble(input: AssemblyInput): Assembly {
     input.solved,
   );
 
+  // Step 8: explanation, one chunk per heading-bounded section.
+  result.explanation = chunkSections(sections.sections(), input.chunking);
+
   // Step 9: checks.
   for (const question of result.questions) {
     for (const reason of questionChecks(question)) flag(question, reason);
+  }
+  for (const chunk of result.explanation) {
+    if (!latexValid(chunk.markdown)) flag(chunk, "latex_invalid");
   }
 
   result.failures.sort((a, b) => a.locator.pdf_page - b.locator.pdf_page);
@@ -436,4 +457,80 @@ function markedAnswer(
       ...new Set(answers.flatMap((a) => a?.accepted_answers ?? [])),
     ],
   };
+}
+
+/**
+ * Gathers heading-bounded sections of explanation in reading order. A heading
+ * opens a section in its node; explanation in another node than the open
+ * section's opens a section headed by that node's name. Diagrams and tables
+ * in an explanation document become the section's figures. Sections with no
+ * text are dropped (a lesson title followed only by questions).
+ */
+class SectionBuilder {
+  private readonly all: Section[] = [];
+  private current: Section | null = null;
+  private pendingHeading: { text: string; node_id: string } | null = null;
+  private readonly segments: readonly OffsetSegment[];
+
+  constructor(segments: readonly OffsetSegment[]) {
+    this.segments = segments;
+  }
+
+  add(item: Placed): void {
+    const { block, node } = item;
+    if (block.kind === "heading") {
+      this.pendingHeading = { text: block.text, node_id: node.node.id };
+      this.current = null;
+      return;
+    }
+    const isFigure =
+      block.kind === "passage" &&
+      block.stimulus?.kind !== "passage" &&
+      block.box !== null;
+    if (block.kind !== "explanation" && !isFigure) return;
+
+    if (this.current?.node_id !== node.node.id) {
+      const heading =
+        this.pendingHeading?.node_id === node.node.id
+          ? this.pendingHeading.text
+          : node.node.name;
+      this.pendingHeading = null;
+      this.current = {
+        id: itemId("c", block.id),
+        node_id: node.node.id,
+        node_path: node.path,
+        external_ref: node.node.external_ref,
+        heading,
+        markdown: "",
+        math_direction: null,
+        figures: [],
+        pdf_pages: [],
+        printed_pages: [],
+      };
+      this.all.push(this.current);
+    }
+    const section = this.current;
+    if (isFigure && block.box) {
+      section.figures.push({
+        pdf_page: block.pdf_page,
+        box: block.box,
+        key: null,
+      });
+    } else {
+      section.markdown =
+        section.markdown === ""
+          ? block.text
+          : `${section.markdown}\n\n${block.text}`;
+      section.math_direction ??= block.math_direction;
+    }
+    if (!section.pdf_pages.includes(block.pdf_page))
+      section.pdf_pages.push(block.pdf_page);
+    const printed = pdfToPrinted(this.segments, block.pdf_page);
+    if (printed !== null && !section.printed_pages.includes(printed))
+      section.printed_pages.push(printed);
+  }
+
+  sections(): Section[] {
+    return this.all.filter((s) => s.markdown.trim() !== "");
+  }
 }

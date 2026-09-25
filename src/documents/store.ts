@@ -6,6 +6,7 @@ import type {
 } from "../contract/document.ts";
 import type { StoredImage, ResultBody } from "../assembly/result.ts";
 import type { OffsetSegment } from "../offset/segments.ts";
+import { hasEntitlement } from "../accounts/entitlements.ts";
 import type { Queryable } from "../shared/db/pool.ts";
 import type { BlobStore } from "../storage/store.ts";
 
@@ -127,7 +128,11 @@ export async function documentView(
     skipped: body?.skipped ?? { neither: 0, off_type: 0 },
     failures: body?.failures ?? [],
   };
-  if (row.type !== "questions") {
+  // Explanation is only returned while the organisation holds the entitlement.
+  if (
+    row.type !== "questions" &&
+    (await hasEntitlement(db, row.org_id, "explanation"))
+  ) {
     document.explanation = await Promise.all(
       (body?.explanation ?? []).map(async (chunk) => ({
         ...chunk,
