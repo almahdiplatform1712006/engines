@@ -1,0 +1,292 @@
+// E-15: people sign up on the page, make an organisation, make an API key, and
+// that key works on /v1/. One organisation never sees another's data.
+import assert from "node:assert/strict";
+import { after, before, describe, test } from "node:test";
+import { getMigrations } from "better-auth/db/migration";
+import { startHarness, type Harness } from "../../test/harness.ts";
+import { scriptedReader } from "../reading/scripted.ts";
+import { authOptions } from "../accounts/auth.ts";
+
+const ORIGIN = "http://engines.test";
+
+let h: Harness;
+before(async () => {
+  h = await startHarness({ reader: () => scriptedReader({ pages: {} }) });
+});
+after(() => h.close());
+
+/** A browser: keeps cookies, sends the page's Origin. */
+function browser() {
+  const jar = new Map<string, string>();
+  let organisation: string | undefined;
+  const send = async (
+    method: string,
+    path: string,
+    body?: unknown,
+    origin: string | null = ORIGIN,
+    extra: Record<string, string> = {},
+  ) => {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      ...extra,
+    };
+    if (origin) headers["origin"] = origin;
+    if (jar.size > 0)
+      headers["cookie"] = [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
+    if (organisation) headers["engines-organisation"] = organisation;
+    const response = await h.app.request(`${ORIGIN}${path}`, {
+      method,
+      headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    for (const cookie of response.headers.getSetCookie()) {
+      const [pair = ""] = cookie.split(";");
+      const at = pair.indexOf("=");
+      jar.set(pair.slice(0, at), pair.slice(at + 1));
+    }
+    return response;
+  };
+  return {
+    send,
+    json: async <T>(method: string, path: string, body?: unknown) => {
+      const response = await send(method, path, body);
+      const text = await response.text();
+      assert.ok(
+        response.ok,
+        `${method} ${path}: ${String(response.status)} ${text}`,
+      );
+      return JSON.parse(text) as T;
+    },
+    actFor(orgId: string | undefined) {
+      organisation = orgId;
+    },
+  };
+}
+
+async function signUp(email: string) {
+  const b = browser();
+  await b.json("POST", "/api/auth/sign-up/email", {
+    email,
+    password: "a long enough password",
+    name: email.split("@")[0],
+  });
+  return b;
+}
+
+async function newOrganisation(b: ReturnType<typeof browser>, name: string) {
+  const org = await b.json<{ id: string }>(
+    "POST",
+    "/api/auth/organization/create",
+    {
+      name,
+      slug: `${name.toLowerCase().replace(/\W+/g, "-")}-${String(Date.now())}`,
+    },
+  );
+  return org.id;
+}
+
+describe("sign-up to a working key", () => {
+  test("sign up → organisation → API key → the key works on /v1/", async () => {
+    const b = await signUp("amal@example.com");
+    const me0 = await b.json<{ organisations: unknown[]; active: unknown }>(
+      "GET",
+      "/page/me",
+    );
+    assert.deepEqual(me0.organisations, []);
+    assert.equal(me0.active, null);
+
+    const orgId = await newOrganisation(b, "Amal School");
+    assert.match(orgId, /^org_/);
+    const me = await b.json<{
+      organisations: { id: string; role: string }[];
+      active: { id: string; role: string };
+    }>("GET", "/page/me");
+    assert.deepEqual(me.active, { id: orgId, role: "owner" });
+
+    const created = await b.json<{ id: string; key: string }>(
+      "POST",
+      "/page/keys",
+      { name: "Almahdi" },
+    );
+    assert.match(created.key, /^eng_/);
+    const keys = await b.json<{ data: { id: string; prefix: string }[] }>(
+      "GET",
+      "/page/keys",
+    );
+    assert.deepEqual(
+      keys.data.map((k) => k.id),
+      [created.id],
+      "listed, and the page's own key isn't",
+    );
+    assert.ok(!JSON.stringify(keys).includes(created.key), "shown once");
+
+    const usage = await h.call("GET", "/v1/usage", undefined, created.key);
+    assert.equal(usage.status, 200);
+    const outline = await h.call(
+      "POST",
+      "/v1/outlines",
+      {
+        source: {
+          type: "manual",
+          nodes: [{ name: "L1", printed_pages: { from: 1, to: 2 } }],
+        },
+      },
+      created.key,
+    );
+    assert.equal(outline.status, 201);
+
+    assert.equal(
+      (await b.send("DELETE", `/page/keys/${created.id}`)).status,
+      204,
+    );
+    const revoked = await h.call("GET", "/v1/usage", undefined, created.key);
+    assert.equal(revoked.status, 401);
+  });
+
+  test("the page itself works on /v1/ through the sign-in cookie", async () => {
+    const b = await signUp("badr@example.com");
+    const orgId = await newOrganisation(b, "Badr Academy");
+    b.actFor(orgId);
+    const usage = await b.json<{ balance: number }>("GET", "/v1/usage");
+    assert.equal(usage.balance, 0);
+    const created = await b.send("POST", "/v1/outlines", {
+      source: {
+        type: "manual",
+        nodes: [{ name: "L1", printed_pages: { from: 1, to: 2 } }],
+      },
+    });
+    assert.equal(created.status, 201);
+
+    // A key that's sent is the only way in: a bad one never falls back to the cookie.
+    const badKey = await b.send("GET", "/v1/usage", undefined, ORIGIN, {
+      authorization: "Bearer eng_not-a-key",
+    });
+    assert.equal(badKey.status, 401);
+  });
+
+  test("a write from another origin, or none, is refused", async () => {
+    const b = await signUp("cross@example.com");
+    await newOrganisation(b, "Cross Site");
+    const body = { name: "x" };
+    assert.equal(
+      (await b.send("POST", "/page/keys", body, "https://evil.example")).status,
+      403,
+    );
+    assert.equal((await b.send("POST", "/page/keys", body, null)).status, 403);
+    assert.equal(
+      (await b.send("POST", "/v1/outlines", body, "https://evil.example"))
+        .status,
+      403,
+    );
+    assert.equal(
+      (await b.send("GET", "/page/keys", undefined, null)).status,
+      200,
+    );
+  });
+});
+
+describe("organisations are walled off", () => {
+  test("one organisation's documents, outlines and keys are 404 to another", async () => {
+    const a = await signUp("owner-a@example.com");
+    const orgA = await newOrganisation(a, "Org A");
+    const key = await a.json<{ id: string; key: string }>(
+      "POST",
+      "/page/keys",
+      {
+        name: "A",
+      },
+    );
+    const outline = (await (
+      await h.call(
+        "POST",
+        "/v1/outlines",
+        {
+          source: {
+            type: "manual",
+            nodes: [{ name: "L1", printed_pages: { from: 1, to: 2 } }],
+          },
+        },
+        key.key,
+      )
+    ).json()) as { id: string };
+
+    const b = await signUp("owner-b@example.com");
+    await newOrganisation(b, "Org B");
+    assert.equal(
+      (await b.send("GET", `/v1/outlines/${outline.id}`)).status,
+      404,
+    );
+    assert.equal((await b.send("DELETE", `/page/keys/${key.id}`)).status, 404);
+    assert.equal(
+      (await h.call("GET", `/v1/outlines/${outline.id}`)).status,
+      404,
+      "and to the harness organisation's key",
+    );
+
+    // Naming an organisation you're not in doesn't get you into it.
+    b.actFor(orgA);
+    const me = await b.json<{ active: unknown }>("GET", "/page/me");
+    assert.equal(me.active, null);
+    assert.equal(
+      (await b.send("GET", `/v1/outlines/${outline.id}`)).status,
+      401,
+    );
+  });
+
+  test("a member can't manage keys; owners can", async () => {
+    const owner = await signUp("owner-c@example.com");
+    const orgId = await newOrganisation(owner, "Org C");
+    const invitation = await owner.json<{ id: string }>(
+      "POST",
+      "/api/auth/organization/invite-member",
+      { email: "member-c@example.com", role: "member", organizationId: orgId },
+    );
+    const member = await signUp("member-c@example.com");
+    await member.json("POST", "/api/auth/organization/accept-invitation", {
+      invitationId: invitation.id,
+    });
+    member.actFor(orgId);
+    const me = await member.json<{ active: { role: string } }>(
+      "GET",
+      "/page/me",
+    );
+    assert.equal(me.active.role, "member");
+    assert.equal((await member.send("GET", "/page/keys")).status, 200);
+    assert.equal(
+      (await member.send("POST", "/page/keys", { name: "nope" })).status,
+      403,
+    );
+  });
+
+  test("organisations can't be deleted from the page", async () => {
+    const owner = await signUp("owner-d@example.com");
+    const orgId = await newOrganisation(owner, "Org D");
+    const response = await owner.send("POST", "/api/auth/organization/delete", {
+      organizationId: orgId,
+    });
+    assert.notEqual(response.status, 200);
+    const { rows } = await h.db.query(
+      "SELECT 1 FROM organisations WHERE id = $1",
+      [orgId],
+    );
+    assert.equal(rows.length, 1);
+  });
+});
+
+test("the accounts migration matches Better Auth's schema", async () => {
+  const { toBeCreated, toBeAdded } = await getMigrations(
+    authOptions(h.db.pool, {
+      baseURL: ORIGIN,
+      secret: "x".repeat(32),
+      google: undefined,
+      trustedOrigins: [],
+    }),
+  );
+  assert.deepEqual(
+    {
+      toBeCreated: toBeCreated.map((t) => t.table),
+      toBeAdded: toBeAdded.map((t) => t.table),
+    },
+    { toBeCreated: [], toBeAdded: [] },
+  );
+});

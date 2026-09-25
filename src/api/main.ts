@@ -4,6 +4,7 @@ import { createQueues } from "../pipeline/pipeline.ts";
 import { systemClock } from "../shared/clock.ts";
 import {
   readApiConfig,
+  readAuthConfig,
   readDatabaseConfig,
   readStorageConfig,
   readExportConfig,
@@ -11,7 +12,12 @@ import {
 } from "../shared/config.ts";
 import { connect } from "../shared/db/pool.ts";
 import { storeFromConfig } from "../storage/from-config.ts";
+import { existsSync } from "node:fs";
+import { createAuth } from "../accounts/auth.ts";
 import { createApp } from "./app.ts";
+
+// The page, built by `npm run build:web`.
+const WEB_DIR = "web/dist";
 
 const { port } = readApiConfig(process.env);
 const { databaseUrl } = readDatabaseConfig(process.env);
@@ -35,6 +41,8 @@ const app = createApp({
   clock: systemClock,
   webhooks: readWebhookPolicy(process.env),
   chromiumPath: readExportConfig(process.env).chromiumPath,
+  auth: createAuth(db.pool, readAuthConfig(process.env)),
+  webDir: existsSync(WEB_DIR) ? WEB_DIR : undefined,
 });
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`api listening on :${String(info.port)}`);

@@ -10,6 +10,10 @@ x-app: &app
     PUBLIC_URL: http://localhost:8080
     # Signs local URLs on this machine only. Not a secret of any real system.
     LOCAL_STORAGE_SECRET: local-development-only
+    # Signs sign-in sessions on this machine only. Not a secret of any real system.
+    AUTH_SECRET: local-development-only-auth-secret-32
+    GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     AI_MODEL: ${AI_MODEL:-}
     AI_MODEL_CHEAP: ${AI_MODEL_CHEAP:-}
     OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}

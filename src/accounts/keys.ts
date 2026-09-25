@@ -1,5 +1,5 @@
-// Organisations and their API keys (E-05, minimal). Better Auth takes over in
-// E-15 behind the same `authenticate` function, so `/v1/` doesn't change.
+// Organisations and their API keys. Keys are Engines' own, not Better Auth's
+// (ADR 0002): hashed at rest, each with its own caps and model provider.
 import { createHash, randomBytes } from "node:crypto";
 import type { Queryable } from "../shared/db/pool.ts";
 import { newId } from "../shared/ids.ts";
@@ -7,6 +7,17 @@ import { newId } from "../shared/ids.ts";
 export interface Caller {
   orgId: string;
   apiKeyId: string;
+  /** The person on Engines' page, when the call came from there. */
+  userId: string | null;
+}
+
+export interface KeyView {
+  id: string;
+  name: string;
+  prefix: string;
+  provider: string;
+  created_at: string;
+  revoked_at: string | null;
 }
 
 export interface CreatedKey {
@@ -26,10 +37,11 @@ export async function createOrganisation(
   name: string,
 ): Promise<string> {
   const id = newId("org");
-  await db.query("INSERT INTO organisations (id, name) VALUES ($1, $2)", [
-    id,
-    name,
-  ]);
+  // The slug is Better Auth's; an organisation made outside the page uses its id.
+  await db.query(
+    "INSERT INTO organisations (id, name, slug) VALUES ($1, $2, $1)",
+    [id, name],
+  );
   return id;
 }
 
@@ -37,18 +49,57 @@ export async function createApiKey(
   db: Queryable,
   orgId: string,
   name: string,
+  createdBy: string | null = null,
 ): Promise<CreatedKey> {
   const id = newId("key");
   const key = `${KEY_PREFIX}${randomBytes(32).toString("base64url")}`;
   await db.query(
-    "INSERT INTO api_keys (id, org_id, name, hash, prefix) VALUES ($1, $2, $3, $4, $5)",
-    [id, orgId, name, hashKey(key), key.slice(0, 12)],
+    "INSERT INTO api_keys (id, org_id, name, hash, prefix, created_by) VALUES ($1, $2, $3, $4, $5, $6)",
+    [id, orgId, name, hashKey(key), key.slice(0, 12), createdBy],
   );
   return { id, key };
 }
 
+/** An organisation's keys, newest first; the page's built-in key isn't one. */
+export async function listKeys(
+  db: Queryable,
+  orgId: string,
+): Promise<KeyView[]> {
+  const { rows } = await db.query<{
+    id: string;
+    name: string;
+    prefix: string;
+    provider: string;
+    created_at: Date;
+    revoked_at: Date | null;
+  }>(
+    `SELECT id, name, prefix, provider, created_at, revoked_at FROM api_keys
+     WHERE org_id = $1 AND NOT built_in ORDER BY created_at DESC, id`,
+    [orgId],
+  );
+  return rows.map((r) => ({
+    ...r,
+    created_at: r.created_at.toISOString(),
+    revoked_at: r.revoked_at?.toISOString() ?? null,
+  }));
+}
+
+/** Revokes one of the organisation's keys; false when it has no such key. */
+export async function revokeKey(
+  db: Queryable,
+  orgId: string,
+  keyId: string,
+): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE api_keys SET revoked_at = COALESCE(revoked_at, now())
+     WHERE id = $1 AND org_id = $2 AND NOT built_in`,
+    [keyId, orgId],
+  );
+  return rowCount === 1;
+}
+
 /** The caller behind an `Authorization: Bearer` header, or null for a missing, unknown or revoked key. */
-export async function authenticate(
+export async function authenticateKey(
   db: Queryable,
   authorization: string | undefined,
 ): Promise<Caller | null> {
@@ -56,9 +107,9 @@ export async function authenticate(
   const key = match?.[1];
   if (!key?.startsWith(KEY_PREFIX)) return null;
   const { rows } = await db.query<{ id: string; org_id: string }>(
-    "SELECT id, org_id FROM api_keys WHERE hash = $1 AND revoked_at IS NULL",
+    "SELECT id, org_id FROM api_keys WHERE hash = $1 AND revoked_at IS NULL AND NOT built_in",
     [hashKey(key)],
   );
   const row = rows[0];
-  return row ? { orgId: row.org_id, apiKeyId: row.id } : null;
+  return row ? { orgId: row.org_id, apiKeyId: row.id, userId: null } : null;
 }

@@ -10,6 +10,8 @@
   "scripts": {
     "start:api": "node --env-file-if-exists=.env src/api/main.ts",
     "start:worker": "node --env-file-if-exists=.env src/worker/main.ts",
+    "dev:web": "vite --config web/vite.config.ts",
+    "build:web": "vite build --config web/vite.config.ts",
     "migrate": "node --env-file-if-exists=.env src/shared/db/migrate-cli.ts",
     "seed": "node --env-file-if-exists=.env src/accounts/seed-cli.ts",
     "credits": "node --env-file-if-exists=.env src/accounts/credits-cli.ts",
@@ -17,23 +19,32 @@
     "golden:draft": "node --env-file-if-exists=.env src/golden/cli.ts draft",
     "golden:sheet": "node src/golden/cli.ts sheet",
     "golden:score": "node --env-file-if-exists=.env src/golden/cli.ts score",
-    "typecheck": "tsc",
+    "typecheck": "tsc && tsc -p web",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --test --test-global-setup=test/global-setup.ts \"src/**/*.test.ts\""
+    "test": "node --test --test-global-setup=test/global-setup.ts \"src/**/*.test.ts\"",
+    "test:page": "npm run build:web && node --test --test-global-setup=test/global-setup.ts \"test/e2e/*.test.ts\""
   },
   "devDependencies": {
     "@ai-sdk/provider": "4.0.18",
     "@eslint/js": "10.0.1",
+    "@headless-tree/core": "1.7.0",
+    "@headless-tree/react": "1.7.0",
     "@types/node": "24.13.6",
     "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
     "embedded-postgres": "18.4.0-beta.17",
     "eslint": "10.11.0",
     "fflate": "0.8.3",
     "prettier": "3.9.8",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.70.1"
+    "typescript-eslint": "8.70.1",
+    "vite": "8.3.1"
   },
   "dependencies": {
     "@ai-sdk/google-vertex": "5.0.93",
@@ -41,6 +52,7 @@
     "@hono/node-server": "2.1.1",
     "@openrouter/ai-sdk-provider": "3.1.0",
     "ai": "7.0.114",
+    "better-auth": "1.7.6",
     "docx": "9.7.2",
     "exceljs": "4.4.0",
     "fast-xml-parser": "5.11.1",

@@ -12,6 +12,8 @@ export interface Db extends Queryable {
   /** Runs `work` in one transaction: committed when it resolves, rolled back when it throws. */
   transaction<T>(work: (tx: Queryable) => Promise<T>): Promise<T>;
   close(): Promise<void>;
+  /** The pool itself, for libraries that bring their own queries (Better Auth). */
+  pool: pg.Pool;
 }
 
 // Postgres bigint and numeric come back as strings by default. Counts and money
@@ -41,5 +43,6 @@ export function connect(databaseUrl: string, max = 10): Db {
       }
     },
     close: () => pool.end(),
+    pool,
   };
 }

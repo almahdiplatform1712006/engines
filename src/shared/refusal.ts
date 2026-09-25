@@ -12,6 +12,7 @@ export type RefusalCode =
   | "too_large"
   | "insufficient_credits"
   | "not_entitled"
+  | "forbidden"
   | "too_many_jobs"
   | "idempotency_mismatch"
   | "wrong_state";

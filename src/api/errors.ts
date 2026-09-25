@@ -13,6 +13,7 @@ const STATUS: Record<
   unauthorized: 401,
   insufficient_credits: 402,
   not_entitled: 403,
+  forbidden: 403,
   not_found: 404,
   outline_not_confirmed: 409,
   outline_frozen: 409,
@@ -59,14 +60,12 @@ export function errorResponse(c: Context, error: unknown): Response {
   );
 }
 
-export function unauthorized(c: Context): Response {
+export function unauthorized(
+  c: Context,
+  message = "Send a valid API key as `Authorization: Bearer <key>`.",
+): Response {
   return c.json(
-    {
-      error: {
-        code: "unauthorized",
-        message: "Send a valid API key as `Authorization: Bearer <key>`.",
-      },
-    },
+    { error: { code: "unauthorized", message } },
     STATUS.unauthorized,
   );
 }

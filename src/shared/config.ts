@@ -166,3 +166,37 @@ export function readExportConfig(env: Env): {
 } {
   return { chromiumPath: parse(exportEnv, env).CHROMIUM_PATH };
 }
+
+const authEnv = z.object({
+  PUBLIC_URL: z.url().default("http://localhost:8080"),
+  AUTH_SECRET: z
+    .string({ error: "AUTH_SECRET is required" })
+    .min(32, "AUTH_SECRET must be at least 32 characters"),
+  GOOGLE_CLIENT_ID: optional,
+  GOOGLE_CLIENT_SECRET: optional,
+  AUTH_TRUSTED_ORIGINS: optional,
+});
+
+export interface AuthSettings {
+  baseURL: string;
+  secret: string;
+  google: { clientId: string; clientSecret: string } | undefined;
+  trustedOrigins: string[];
+}
+
+/** Sign-in on Engines' page (E-15). Google sign-in is on when both of its settings are. */
+export function readAuthConfig(env: Env): AuthSettings {
+  const e = parse(authEnv, env);
+  return {
+    baseURL: e.PUBLIC_URL,
+    secret: e.AUTH_SECRET,
+    google:
+      e.GOOGLE_CLIENT_ID && e.GOOGLE_CLIENT_SECRET
+        ? { clientId: e.GOOGLE_CLIENT_ID, clientSecret: e.GOOGLE_CLIENT_SECRET }
+        : undefined,
+    trustedOrigins: (e.AUTH_TRUSTED_ORIGINS ?? "")
+      .split(",")
+      .map((o) => o.trim())
+      .filter((o) => o !== ""),
+  };
+}

@@ -1,7 +1,10 @@
+import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono, type Context } from "hono";
 import type { PgBoss } from "pg-boss";
 import { balance, ledger } from "../accounts/credits.ts";
-import { authenticate, type Caller } from "../accounts/keys.ts";
+import type { Auth } from "../accounts/auth.ts";
+import { authenticateKey, type Caller } from "../accounts/keys.ts";
+import { sessionCaller } from "../accounts/sessions.ts";
 import {
   ConfirmOffsetRequest,
   CreateDocumentRequest,
@@ -35,6 +38,8 @@ import {
 } from "../exports/export.ts";
 import { chromiumPath } from "../exports/pdf.ts";
 import { errorResponse, readBody, unauthorized } from "./errors.ts";
+import { pageRoutes } from "./page.ts";
+import { allowedOrigins, readSession } from "./page-session.ts";
 import {
   IDEMPOTENCY_HEADER,
   withIdempotency,
@@ -49,6 +54,10 @@ export interface AppDeps {
   webhooks: TargetPolicy;
   /** The Chromium binary for PDF exports; found on the usual paths when unset. */
   chromiumPath?: string | undefined;
+  /** Sign-in on Engines' page. */
+  auth: Auth;
+  /** The built page (web/dist), served at `/` when set. */
+  webDir?: string | undefined;
 }
 
 interface Env {
@@ -65,9 +74,33 @@ export function createApp(deps: AppDeps): Hono {
 
   if (store.routes) app.route("/local-storage", store.routes);
 
+  const { auth } = deps;
+  const session = {
+    auth,
+    db,
+    origins: allowedOrigins(auth.options.baseURL, auth.options.trustedOrigins),
+  };
+  app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+  app.route(
+    "/page",
+    pageRoutes({
+      ...session,
+      google: auth.options.socialProviders !== undefined,
+    }),
+  );
+
+  // An API key when one is sent; otherwise the person signed in to the page,
+  // acting for their organisation.
   const v1 = new Hono<Env>();
   v1.use(async (c, next) => {
-    const caller = await authenticate(db, c.req.header("authorization"));
+    const authorization = c.req.header("authorization");
+    let caller: Caller | null = null;
+    if (authorization !== undefined) {
+      caller = await authenticateKey(db, authorization);
+    } else {
+      const signedIn = await readSession(session, c);
+      if (signedIn) caller = await sessionCaller(db, signedIn);
+    }
     if (!caller) return unauthorized(c);
     c.set("caller", caller);
     return next();
@@ -218,5 +251,17 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.route("/v1", v1);
+
+  if (deps.webDir) {
+    const root = deps.webDir;
+    app.use("/assets/*", serveStatic({ root }));
+    // Every other page path is the single-page app's; API paths stay 404.
+    const index = serveStatic({ root, path: "index.html" });
+    app.get("*", (c, next) =>
+      /^\/(v1|api|page|local-storage)(\/|$)/.test(c.req.path)
+        ? next()
+        : index(c, next),
+    );
+  }
   return app;
 }

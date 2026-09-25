@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Hono } from "hono";
 import { grantCredits } from "../src/accounts/credits.ts";
+import { createAuth } from "../src/accounts/auth.ts";
 import { createApiKey, createOrganisation } from "../src/accounts/keys.ts";
 import { createApp } from "../src/api/app.ts";
 import type { Document } from "../src/contract/document.ts";
@@ -71,6 +72,10 @@ export interface HarnessOptions {
   reader: (provider: string) => PageReader;
   clock?: Clock;
   pipeline?: Partial<PipelineOptions>;
+  /** Serve the built page from here. */
+  webDir?: string;
+  /** Where a browser reaches the app (store URLs, sign-in); a fake host otherwise. */
+  publicUrl?: string;
 }
 
 export async function startHarness(options: HarnessOptions): Promise<Harness> {
@@ -78,9 +83,10 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
   await runMigrations(database.url);
   const dir = await mkdtemp(join(tmpdir(), "engines-harness-"));
   const clock = options.clock ?? systemClock;
+  const publicUrl = options.publicUrl ?? PUBLIC_URL;
   const store = localStore({
     dir,
-    publicUrl: PUBLIC_URL,
+    publicUrl,
     secret: "harness-secret-harness",
   });
   const worker = await startWorker({
@@ -102,6 +108,13 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
     store,
     clock,
     webhooks: { allowPrivate: true },
+    auth: createAuth(db.pool, {
+      baseURL: publicUrl,
+      secret: "harness-auth-secret-harness-auth-secret",
+      google: undefined,
+      trustedOrigins: [],
+    }),
+    ...(options.webDir ? { webDir: options.webDir } : {}),
   });
 
   const newKey = async (orgName = "Test organisation", credits = 100_000) => {
@@ -144,7 +157,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
         id: string;
         upload_url: string;
       };
-      const put = await app.request(upload_url.replace(PUBLIC_URL, ""), {
+      const put = await app.request(upload_url.replace(publicUrl, ""), {
         method: "PUT",
         body: bytes,
       });
@@ -192,7 +205,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
         key,
       );
       const upload = await expect(created, 201);
-      await app.request(String(upload["upload_url"]).replace(PUBLIC_URL, ""), {
+      await app.request(String(upload["upload_url"]).replace(publicUrl, ""), {
         method: "PUT",
         body: book.pdf,
       });

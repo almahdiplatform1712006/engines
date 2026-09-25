@@ -1,0 +1,299 @@
+/* Logical properties only (inline = along the text, block = down the page), so
+   one stylesheet serves right-to-left Arabic and left-to-right English. */
+@font-face {
+  font-family: "Noto Naskh Arabic";
+  src: url("../../assets/fonts/NotoNaskhArabic.ttf") format("truetype");
+  font-display: swap;
+}
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1c2430;
+  --muted: #5f6b7a;
+  --line: #dde2e8;
+  --accent: #1f5fbf;
+  --accent-text: #ffffff;
+  --danger: #b3261e;
+  --notice: #eef5ff;
+  color-scheme: light;
+  font-family: "Noto Naskh Arabic", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11151b;
+    --surface: #1a2029;
+    --text: #e6eaf0;
+    --muted: #9aa6b4;
+    --line: #2c3440;
+    --accent: #6ea2f2;
+    --accent-text: #0b1320;
+    --danger: #f2837c;
+    --notice: #1b2a40;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+.app {
+  min-block-size: 100vh;
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding-block: 0.75rem;
+  padding-inline: 1rem;
+  background: var(--surface);
+  border-block-end: 1px solid var(--line);
+}
+
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand {
+  font-size: 1.2rem;
+}
+
+main {
+  max-inline-size: 60rem;
+  margin-inline: auto;
+  padding: 1rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-block-end: 1rem;
+}
+
+.narrow {
+  max-inline-size: 26rem;
+  margin-inline: auto;
+}
+
+h1 {
+  font-size: 1.4rem;
+  margin-block: 0 1rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin-block: 1.25rem 0.5rem;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+form.row,
+.row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+input,
+select {
+  padding-block: 0.45rem;
+  padding-inline: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  min-inline-size: 0;
+}
+
+.row input {
+  flex: 1 1 12rem;
+}
+
+button {
+  padding-block: 0.45rem;
+  padding-inline: 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--accent);
+}
+
+button.danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 0.875rem;
+}
+
+.error {
+  color: var(--danger);
+  margin: 0;
+}
+
+.divider {
+  text-align: center;
+  color: var(--muted);
+}
+
+.notice {
+  background: var(--notice);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-block-end: 1rem;
+}
+
+.secret {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 0.5rem;
+  margin-block: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  text-align: start;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-block-end: 1rem;
+  border-block-end: 1px solid var(--line);
+}
+
+.tab {
+  padding-block: 0.5rem;
+  padding-inline: 0.9rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-block-end: 2px solid transparent;
+}
+
+.tab.active {
+  color: var(--text);
+  border-block-end-color: var(--accent);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-block: 0.6rem;
+  border-block-end: 1px solid var(--line);
+}
+
+.list li.revoked {
+  opacity: 0.6;
+}
+
+.badge {
+  font-size: 0.8rem;
+  padding-block: 0.1rem;
+  padding-inline: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.balance {
+  font-size: 1.2rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: start;
+  padding-block: 0.4rem;
+  padding-inline: 0.5rem;
+  border-block-end: 1px solid var(--line);
+}
+
+td.num {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: end;
+}
+
+/* Numbers are written left to right in either language. */
+input.number {
+  direction: ltr;
+  inline-size: 5.5rem;
+  text-align: center;
+}

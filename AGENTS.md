@@ -30,13 +30,14 @@ Also from the spec: the model name is config, never hard-coded at a call site. p
 | `src/outline/`   | Syllabus tree validation and storage                                        |
 | `src/render/`    | poppler (`pdftoppm` → `pdftocairo`) and photo normalisation                 |
 | `src/storage/`   | `BlobStore`: local disk (dev, tests) and Google Cloud Storage               |
-| `src/accounts/`  | Organisations, API keys, `authenticate`                                     |
+| `src/accounts/`  | Organisations, API keys, sign-in (Better Auth), credits, entitlements       |
 | `src/shared/`    | Config (Zod-parsed env), database pool and migrations, text normalisation   |
+| `web/`           | Engines' page: React + Vite, built to `web/dist` and served by the API      |
 | `src/golden/`    | Golden-set tools: file formats, drafting, correction sheet, scorers         |
 | `golden/`        | Golden-set manifests, truth files and runs. Page images are never committed |
 | `migrations/`    | SQL migrations (node-pg-migrate, `-- Up Migration` / `-- Down Migration`)   |
 | `test/`          | Test harness: Postgres, the whole stack on a scripted reader, PDF builder   |
-| `docs/adr/`      | Architecture decisions. Read `0001` before touching the pipeline            |
+| `docs/adr/`      | Architecture decisions. Read `0001` before the pipeline, `0002` before auth |
 | `docs/research/` | Tooling research behind spec §5                                             |
 | `docs/agents/`   | How agents use the issue tracker, labels and domain docs                    |
 
@@ -58,6 +59,15 @@ npm run typecheck
 npm run lint
 npm run format:check
 npm test                      # unit + database tests
+npm run test:page             # builds the page, then drives it in Chromium
+```
+
+The page:
+
+```sh
+npm run build:web             # web/dist, served by the API at http://localhost:8080/
+npm run dev:web               # or Vite on :5173 with hot reload, proxying to the API on :8080
+                              # (set AUTH_TRUSTED_ORIGINS=http://localhost:5173 for the API)
 ```
 
 `npm test` runs the database tests against `DATABASE_URL` when it's set (CI sets it to a Postgres service container). When it isn't set, it starts a throwaway embedded Postgres for the run, so no Docker is needed. Each test file gets its own fresh database.

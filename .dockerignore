@@ -8,3 +8,4 @@ golden
 **/*.test.ts
 .env
 .env.*
+web/dist
