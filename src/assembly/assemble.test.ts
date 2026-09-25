@@ -97,6 +97,31 @@ describe("placement (E-05)", () => {
     );
   });
 
+  test("no block disappears: each is delivered, counted as skipped, or in a failure", () => {
+    const pages = {
+      1: page("1", [
+        modelBlock({ kind: "heading", text: "الدرس الأول" }),
+        modelBlock({ kind: "explanation", text: "شرح" }),
+        modelBlock({ kind: "passage", text: "نص", stimulus_kind: "passage" }),
+        mcq("1", "a"),
+        modelBlock({ kind: "neither" }),
+      ]),
+      9: page("9", [mcq("2", "outside"), modelBlock({ kind: "neither" })]),
+    };
+    const questions = run(pages, { type: "questions" });
+    assert.equal(questions.questions.length, 1);
+    assert.equal(questions.stimuli.length, 1);
+    assert.deepEqual(questions.skipped, { neither: 2, off_type: 1 });
+    assert.deepEqual(
+      questions.failures.map((f) => f.reason),
+      ["unmapped_page"],
+    );
+
+    const explanation = run(pages, { type: "explanation" });
+    assert.equal(explanation.questions.length, 0);
+    assert.deepEqual(explanation.skipped, { neither: 2, off_type: 2 });
+  });
+
   test("blocks that are neither are counted, not dropped", () => {
     const result = run({
       1: page("1", [modelBlock({ kind: "neither" }), mcq("1", "a")]),
