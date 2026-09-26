@@ -1,0 +1,72 @@
+import { callLimiter } from "../reading/limit.ts";
+import { createModelReader } from "../reading/model.ts";
+import { recordCallsIn } from "../reading/log.ts";
+import { languageModel } from "../reading/providers.ts";
+import { unavailableReader, type PageReader } from "../reading/reader.ts";
+import { systemClock } from "../shared/clock.ts";
+import {
+  readAiConfig,
+  readDatabaseConfig,
+  readStorageConfig,
+  readWebhookPolicy,
+  readWorkerConfig,
+  type Provider,
+} from "../shared/config.ts";
+import { connect } from "../shared/db/pool.ts";
+import { storeFromConfig } from "../storage/from-config.ts";
+import { startWorker } from "./worker.ts";
+
+const { databaseUrl } = readDatabaseConfig(process.env);
+const ai = readAiConfig(process.env);
+const logDb = connect(databaseUrl, 2);
+const record = recordCallsIn(logDb);
+
+// One reader per provider, built on first use so a worker starts without keys
+// and only fails the pages it can't read.
+const readers = new Map<Provider, PageReader>();
+const workerConfig = readWorkerConfig(process.env);
+const limit = callLimiter(workerConfig.modelConcurrency);
+const reader = (provider: Provider): PageReader => {
+  let existing = readers.get(provider);
+  if (!existing) {
+    try {
+      existing = limit(
+        createModelReader({
+          main: languageModel(ai, provider, "main"),
+          cheap: languageModel(ai, provider, "cheap"),
+          record,
+        }),
+      );
+    } catch (error) {
+      console.error(`model reader for ${provider}:`, error);
+      existing = unavailableReader(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+    readers.set(provider, existing);
+  }
+  return existing;
+};
+
+const worker = await startWorker({
+  databaseUrl,
+  chunking: workerConfig.chunking,
+  webhooks: readWebhookPolicy(process.env),
+  store: storeFromConfig(readStorageConfig(process.env)),
+  clock: systemClock,
+  reader,
+  options: { pageConcurrency: workerConfig.pageConcurrency },
+});
+console.log("worker started");
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    Promise.all([worker.stop(), logDb.close()]).then(
+      () => process.exit(0),
+      (error: unknown) => {
+        console.error(error);
+        process.exit(1);
+      },
+    );
+  });
+}

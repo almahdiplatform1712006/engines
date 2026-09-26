@@ -1,0 +1,744 @@
+/* Logical properties only (inline = along the text, block = down the page), so
+   one stylesheet serves right-to-left Arabic and left-to-right English. */
+@font-face {
+  font-family: "Noto Naskh Arabic";
+  src: url("../../assets/fonts/NotoNaskhArabic.ttf") format("truetype");
+  font-display: swap;
+}
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1c2430;
+  --muted: #5f6b7a;
+  --line: #dde2e8;
+  --accent: #1f5fbf;
+  --accent-text: #ffffff;
+  --danger: #b3261e;
+  --notice: #eef5ff;
+  color-scheme: light;
+  font-family: "Noto Naskh Arabic", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11151b;
+    --surface: #1a2029;
+    --text: #e6eaf0;
+    --muted: #9aa6b4;
+    --line: #2c3440;
+    --accent: #6ea2f2;
+    --accent-text: #0b1320;
+    --danger: #f2837c;
+    --notice: #1b2a40;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+.app {
+  min-block-size: 100vh;
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding-block: 0.75rem;
+  padding-inline: 1rem;
+  background: var(--surface);
+  border-block-end: 1px solid var(--line);
+}
+
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand {
+  font-size: 1.2rem;
+}
+
+main {
+  max-inline-size: 60rem;
+  margin-inline: auto;
+  padding: 1rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-block-end: 1rem;
+}
+
+.narrow {
+  max-inline-size: 26rem;
+  margin-inline: auto;
+}
+
+h1 {
+  font-size: 1.4rem;
+  margin-block: 0 1rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin-block: 1.25rem 0.5rem;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+form.row,
+.row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+input,
+select {
+  padding-block: 0.45rem;
+  padding-inline: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  min-inline-size: 0;
+}
+
+.row input {
+  flex: 1 1 12rem;
+}
+
+button {
+  padding-block: 0.45rem;
+  padding-inline: 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--accent);
+}
+
+button.danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 0.875rem;
+}
+
+.error {
+  color: var(--danger);
+  margin: 0;
+}
+
+.divider {
+  text-align: center;
+  color: var(--muted);
+}
+
+.notice {
+  background: var(--notice);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-block-end: 1rem;
+}
+
+.secret {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 0.5rem;
+  margin-block: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  text-align: start;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-block-end: 1rem;
+  border-block-end: 1px solid var(--line);
+}
+
+.tab {
+  padding-block: 0.5rem;
+  padding-inline: 0.9rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-block-end: 2px solid transparent;
+}
+
+.tab.active {
+  color: var(--text);
+  border-block-end-color: var(--accent);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-block: 0.6rem;
+  border-block-end: 1px solid var(--line);
+}
+
+.list li.revoked {
+  opacity: 0.6;
+}
+
+.badge {
+  font-size: 0.8rem;
+  padding-block: 0.1rem;
+  padding-inline: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.balance {
+  font-size: 1.2rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: start;
+  padding-block: 0.4rem;
+  padding-inline: 0.5rem;
+  border-block-end: 1px solid var(--line);
+}
+
+td.num {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: end;
+}
+
+/* Numbers are written left to right in either language. */
+input.number {
+  direction: ltr;
+  inline-size: 5.5rem;
+  text-align: center;
+}
+
+/* New book */
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-block: 0 1rem;
+  margin-inline: 0;
+  min-inline-size: 0;
+}
+
+legend {
+  font-weight: bold;
+  padding-inline: 0.25rem;
+}
+
+label.choice {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding-block: 0.3rem;
+}
+
+label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.block {
+  display: block;
+}
+
+.dropzone {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  margin-block-end: 1rem;
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.dropzone.over {
+  border-color: var(--accent);
+  background: var(--notice);
+}
+
+.button-like {
+  display: inline-block;
+  padding-block: 0.45rem;
+  padding-inline: 1rem;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.list.files li {
+  overflow-wrap: anywhere;
+}
+
+.progress-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+}
+
+progress {
+  inline-size: 100%;
+  max-inline-size: 20rem;
+}
+
+.warning {
+  color: #8a5a00;
+  margin: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .warning {
+    color: #f0c060;
+  }
+}
+
+button.small {
+  padding-block: 0.15rem;
+  padding-inline: 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* Tree editor: the tree, then the syllabus beside it (below it when narrow) */
+.editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 60rem) {
+  .editor-layout {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+
+  main:has(.editor-layout) {
+    max-inline-size: 90rem;
+  }
+
+  .source {
+    position: sticky;
+    inset-block-start: 1rem;
+    max-block-size: calc(100vh - 2rem);
+    overflow-y: auto;
+  }
+}
+
+.source img {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  margin-block-end: 0.75rem;
+  border: 1px solid var(--line);
+}
+
+.tree {
+  margin-block: 0.75rem;
+}
+
+.tree-node {
+  border-block-start: 2px solid transparent;
+  border-block-end: 1px solid var(--line);
+  padding-block: 0.4rem;
+}
+
+.tree-node.drop-above {
+  border-block-start-color: var(--accent);
+}
+
+.tree-node.drop-below {
+  border-block-end: 2px solid var(--accent);
+}
+
+.tree-node.drop-inside {
+  background: var(--notice);
+}
+
+.tree-node[aria-level="2"] .node-fields,
+.tree-node[aria-level="3"] .node-fields,
+.tree-node[aria-level="4"] .node-fields {
+  border-inline-start: 2px solid var(--line);
+  padding-inline-start: 0.5rem;
+}
+
+.tree-node.has-error {
+  border-inline-start: 3px solid var(--danger);
+}
+
+.node-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  padding-inline: 0.25rem;
+  user-select: none;
+  touch-action: none;
+}
+
+.node-name {
+  flex: 1 1 10rem;
+}
+
+.node-level {
+  flex: 0 1 7rem;
+  inline-size: 7rem;
+}
+
+.range {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.range input.number {
+  inline-size: 3.5rem;
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.node-actions {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.issues {
+  margin-block: 0.25rem 0;
+  padding-inline-start: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.toolbar,
+.status-line {
+  margin-block: 0.75rem;
+}
+
+/* Books, upload and progress */
+.row.spread {
+  justify-content: space-between;
+}
+
+.secondary-link {
+  color: var(--accent);
+}
+
+.summary {
+  padding-inline-start: 1.25rem;
+}
+
+.segment {
+  border-block-end: 1px solid var(--line);
+  padding-block: 0.75rem;
+}
+
+.thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.thumbs figure {
+  margin: 0;
+  inline-size: 10rem;
+  max-inline-size: 45%;
+}
+
+.thumbs img {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  border: 1px solid var(--line);
+}
+
+/* Review: the tree, the items, the page (stacked when narrow) */
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 64rem) {
+  main:has(.review-layout) {
+    max-inline-size: 100rem;
+  }
+
+  .review-layout {
+    grid-template-columns: minmax(12rem, 1fr) minmax(0, 2.2fr) minmax(0, 1.6fr);
+  }
+
+  .review-tree,
+  .review-page {
+    position: sticky;
+    inset-block-start: 1rem;
+    max-block-size: calc(100vh - 2rem);
+    overflow-y: auto;
+  }
+}
+
+.node-list {
+  list-style: none;
+  margin: 0;
+  padding-inline-start: 0.75rem;
+}
+
+.review-tree > .node-list {
+  padding-inline-start: 0;
+}
+
+.node-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  inline-size: 100%;
+  padding-block: 0.3rem;
+  padding-inline: 0.4rem;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  text-align: start;
+}
+
+.node-link.selected {
+  background: var(--notice);
+}
+
+.badge.flag {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.item {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-block-end: 0.75rem;
+}
+
+.item.flagged {
+  border-inline-start: 3px solid var(--danger);
+}
+
+.item header {
+  margin-block-end: 0.4rem;
+}
+
+.options {
+  list-style: none;
+  padding-inline-start: 0.5rem;
+}
+
+.options li.correct {
+  font-weight: bold;
+}
+
+.item-actions {
+  margin-block-start: 0.5rem;
+}
+
+.item-actions select {
+  max-inline-size: 12rem;
+}
+
+.stimulus-group {
+  border-inline-start: 3px solid var(--line);
+  padding-inline-start: 0.75rem;
+  margin-block-end: 1rem;
+}
+
+.stimulus {
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-block-end: 0.75rem;
+}
+
+.stimulus img,
+img.figure,
+img.page-image {
+  display: block;
+  max-inline-size: 100%;
+  block-size: auto;
+}
+
+.question-form textarea {
+  font: inherit;
+  min-block-size: 5rem;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.option-row input:not([type="checkbox"]) {
+  flex: 1 1 10rem;
+}
+
+.placeable {
+  border-block-start: 1px dashed var(--line);
+  padding-block: 0.5rem;
+}
+
+.rich math {
+  font-size: 1.05em;
+}
+
+.rich table {
+  inline-size: auto;
+}
+
+/* Crop box editing: image coordinates, so this area is left to right. */
+.crop-area {
+  position: relative;
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+}
+
+.crop-area img {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  pointer-events: none;
+}
+
+.crop-box {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: rgb(31 95 191 / 0.15);
+  cursor: move;
+}
+
+.crop-handle {
+  position: absolute;
+  inset-inline-end: -7px;
+  inset-block-end: -7px;
+  inline-size: 14px;
+  block-size: 14px;
+  background: var(--accent);
+  border-radius: 2px;
+  cursor: nwse-resize;
+}
+
+.chunk-figure {
+  margin-block: 0.5rem;
+  margin-inline: 0;
+}
+
+tr.clickable {
+  cursor: pointer;
+}
+
+tr.clickable:hover {
+  background: var(--notice);
+}

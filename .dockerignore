@@ -1,0 +1,11 @@
+.git
+.github
+.claude
+node_modules
+test
+docs
+golden
+**/*.test.ts
+.env
+.env.*
+web/dist

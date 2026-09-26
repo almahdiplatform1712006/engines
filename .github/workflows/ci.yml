@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: typecheck, lint, test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: engines
+          POSTGRES_PASSWORD: engines
+          POSTGRES_DB: engines
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U engines -d engines"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # The CI service container above. Not a real database.
+      DATABASE_URL: postgres://engines:engines@localhost:5432/engines
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      # The pipeline's tests render real PDFs with poppler; exports print with
+      # the runner's Google Chrome.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      # openapi.json and the client's types must match the Zod schemas.
+      - run: npm run openapi -- --check
+      - run: npm test
+      # Engines' page in a real browser (the runner's Google Chrome).
+      - run: npm run test:page
+      # The typed client, built and packed as a tarball.
+      - run: npm run client:pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engines-client
+          path: client/*.tgz
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - run: docker build -t engines:ci .
+
+      - name: poppler is in the image
+        run: docker run --rm engines:ci sh -c 'command -v pdftoppm && command -v pdftocairo && pdftoppm -v'
+
+      - name: migrations run cleanly on the compose Postgres
+        run: |
+          docker tag engines:ci engines:local
+          docker compose up -d --wait postgres
+          docker compose run --rm migrate
+          docker compose run --rm migrate
+
+      - name: GET /v1/health returns 200 from the container
+        run: |
+          docker compose up -d api
+          for _ in $(seq 1 30); do
+            if curl -fsS localhost:8080/v1/health; then exit 0; fi
+            sleep 1
+          done
+          docker compose logs api
+          exit 1
+
+      - name: the container serves the page, right-to-left
+        run: curl -fsS localhost:8080/ | grep -q 'dir="rtl"'
+
+      - name: the worker entry point starts and connects pg-boss
+        run: |
+          docker compose up -d worker
+          for _ in $(seq 1 30); do
+            if docker compose logs worker | grep -q "worker started"; then exit 0; fi
+            sleep 1
+          done
+          docker compose logs worker
+          exit 1
+
+      - name: tear down compose
+        if: always()
+        run: docker compose down -v
