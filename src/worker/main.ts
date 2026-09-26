@@ -2,7 +2,7 @@ import { callLimiter } from "../reading/limit.ts";
 import { createModelReader } from "../reading/model.ts";
 import { recordCallsIn } from "../reading/log.ts";
 import { languageModel } from "../reading/providers.ts";
-import type { PageReader } from "../reading/reader.ts";
+import { unavailableReader, type PageReader } from "../reading/reader.ts";
 import { systemClock } from "../shared/clock.ts";
 import {
   readAiConfig,
@@ -29,13 +29,20 @@ const limit = callLimiter(workerConfig.modelConcurrency);
 const reader = (provider: Provider): PageReader => {
   let existing = readers.get(provider);
   if (!existing) {
-    existing = limit(
-      createModelReader({
-        main: languageModel(ai, provider, "main"),
-        cheap: languageModel(ai, provider, "cheap"),
-        record,
-      }),
-    );
+    try {
+      existing = limit(
+        createModelReader({
+          main: languageModel(ai, provider, "main"),
+          cheap: languageModel(ai, provider, "cheap"),
+          record,
+        }),
+      );
+    } catch (error) {
+      console.error(`model reader for ${provider}:`, error);
+      existing = unavailableReader(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
     readers.set(provider, existing);
   }
   return existing;

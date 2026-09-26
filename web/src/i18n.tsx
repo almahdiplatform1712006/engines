@@ -156,6 +156,8 @@ const ar = {
   download: "تنزيل",
   offsetTitle: "أين تبدأ أرقام الصفحات المطبوعة؟",
   offsetHelp: "تحقّق من الرقم المطبوع في الصورتين، وصحّحه إن لزم.",
+  offsetNoneFound:
+    "لم نجد أرقام صفحات مطبوعة. اكتب رقم صفحة مطبوعة ورقم صفحة الملف التي هو عليها.",
   printedPage: "الصفحة المطبوعة",
   pdfPage: "صفحة الملف",
   pdfPageN: "صفحة الملف {n}",
@@ -395,6 +397,8 @@ const en: Dictionary = {
   offsetTitle: "Where do the printed page numbers start?",
   offsetHelp:
     "Check the printed number on both pages, and correct it if needed.",
+  offsetNoneFound:
+    "No printed page numbers were found. Enter a printed page number and the file page it's on.",
   printedPage: "Printed page",
   pdfPage: "PDF page",
   pdfPageN: "PDF page {n}",

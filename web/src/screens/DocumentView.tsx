@@ -163,10 +163,14 @@ function OffsetConfirm(props: {
   const [segments, setSegments] = useState<
     { printed_from: number | null; pdf_from: number | null }[]
   >(
-    doc.offset.map((s) => ({
-      printed_from: s.printed_from,
-      pdf_from: s.pdf_from,
-    })),
+    // No numbers found (a scan, or the quick pass failed): one segment for
+    // the person to fill in.
+    doc.offset.length === 0
+      ? [{ printed_from: null, pdf_from: null }]
+      : doc.offset.map((s) => ({
+          printed_from: s.printed_from,
+          pdf_from: s.pdf_from,
+        })),
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -199,7 +203,9 @@ function OffsetConfirm(props: {
   return (
     <div className="offset">
       <h2>{t.offsetTitle}</h2>
-      <p className="muted">{t.offsetHelp}</p>
+      <p className="muted">
+        {doc.offset.length === 0 ? t.offsetNoneFound : t.offsetHelp}
+      </p>
       {segments.map((segment, i) => {
         const pdf = Math.min(Math.max(segment.pdf_from ?? 1, 1), pageCount);
         const samples = [pdf, Math.min(pdf + 1, pageCount)].filter(

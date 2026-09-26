@@ -8,7 +8,7 @@
 // records them; the one that reaches zero moves the document on. A task that
 // crashes or runs out of retries reaches its dead-letter queue, whose handler
 // settles it as failed, so a document never waits on a lost task.
-import type { JobWithMetadata } from "pg-boss";
+import type { Job, JobWithMetadata } from "pg-boss";
 import { advance, failDocument, runTask, taskDied } from "./advance.ts";
 import {
   createQueues,
@@ -45,9 +45,11 @@ export async function registerPipeline(
   const poll = { pollingIntervalSeconds: options.pollingIntervalSeconds };
   const busy = { ...poll, localConcurrency: options.pageConcurrency };
 
-  await boss.work<DocumentJob>(queues.render, poll, async ([job]) => {
-    if (job) await render(deps, job.data.documentId);
-  });
+  await boss.work<DocumentJob>(
+    queues.render,
+    poll,
+    logged(queues.render, (data) => render(deps, data.documentId)),
+  );
   await boss.work<DocumentJob>(queues.renderDead, poll, async ([job]) => {
     if (job)
       await failDocument(
@@ -59,9 +61,11 @@ export async function registerPipeline(
   // Every page read shares one group, so the model sees at most
   // `globalPageReads` calls at once across all workers.
   const reads = { ...busy, groupConcurrency: options.globalPageReads };
-  await boss.work<PageJob>(queues.readPage, reads, async ([job]) => {
-    if (job) await readPage(deps, job.data);
-  });
+  await boss.work<PageJob>(
+    queues.readPage,
+    reads,
+    logged(queues.readPage, (data) => readPage(deps, data)),
+  );
   await boss.work<PageJob>(queues.readPageDead, poll, async ([job]) => {
     if (!job) return;
     const { rows } = await deps.db.query<{ error: string | null }>(
@@ -73,18 +77,24 @@ export async function registerPipeline(
       error: rows[0]?.error ?? "the page task stopped",
     });
   });
-  await boss.work<TaskJob>(queues.task, busy, async ([job]) => {
-    if (job) await runTask(deps, job.data);
-  });
+  await boss.work<TaskJob>(
+    queues.task,
+    busy,
+    logged(queues.task, (data) => runTask(deps, data)),
+  );
   await boss.work<TaskJob>(queues.taskDead, poll, async ([job]) => {
     if (job) await taskDied(deps, job.data);
   });
-  await boss.work<DocumentJob>(queues.advance, poll, async ([job]) => {
-    if (job) await advance(deps, job.data.documentId);
-  });
-  await boss.work<OutlineJob>(queues.draftOutline, poll, async ([job]) => {
-    if (job) await draftOutline(deps, job.data.outlineId);
-  });
+  await boss.work<DocumentJob>(
+    queues.advance,
+    poll,
+    logged(queues.advance, (data) => advance(deps, data.documentId)),
+  );
+  await boss.work<OutlineJob>(
+    queues.draftOutline,
+    poll,
+    logged(queues.draftOutline, (data) => draftOutline(deps, data.outlineId)),
+  );
   await boss.work<OutlineJob>(queues.draftOutlineDead, poll, async ([job]) => {
     if (job) await draftingDied(deps, job.data.outlineId);
   });
@@ -101,4 +111,20 @@ export async function registerPipeline(
       if (job) await deliverWebhook(deps, job.data, job.retryCount + 1);
     },
   );
+}
+
+/**
+ * A job's handler. A failure is logged before pg-boss retries the job, so
+ * the cause is in the worker's log, not only in the job table.
+ */
+function logged<T>(queue: string, handle: (data: T) => Promise<void>) {
+  return async ([job]: Job<T>[]) => {
+    if (!job) return;
+    try {
+      await handle(job.data);
+    } catch (error) {
+      console.error(`${queue} ${JSON.stringify(job.data)}:`, error);
+      throw error;
+    }
+  };
 }

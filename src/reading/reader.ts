@@ -53,6 +53,21 @@ export interface PageReader {
   ): Promise<ContentsEntry[]>;
 }
 
+/**
+ * The reader for a provider that isn't set up (no key or model name): every
+ * call fails with why, so only what needs the model fails, never the job.
+ */
+export function unavailableReader(reason: Error): PageReader {
+  const fail = () => Promise.reject(reason);
+  return {
+    readPrintedNumber: fail,
+    readPage: fail,
+    readPair: fail,
+    solve: fail,
+    readContents: fail,
+  };
+}
+
 /** A question for the model to solve, with its shared passage when it has one. */
 export interface SolveRequest {
   question_id: string;
