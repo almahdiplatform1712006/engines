@@ -1,0 +1,2814 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Engines",
+    "version": "1.0.0",
+    "description": "A teacher's own book in, questions and explanation out, filed under their syllabus tree. See docs/integrate.md."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "paths": {
+    "/v1/uploads": {
+      "post": {
+        "summary": "Start an upload; PUT the file to `upload_url` (resumable).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUploadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Upload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "too_large (800 pages or 500 MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/outlines": {
+      "post": {
+        "summary": "Start a syllabus tree: a tree (or a starting tree with external_ref), or a syllabus to draft one from.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Run a create at most once per key (24 hours); a repeat returns the same object as it is now.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOutlineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Outline"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "insufficient_credits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "outline_not_confirmed / outline_frozen / upload_incomplete / wrong_state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "too_large (800 pages or 500 MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too_many_jobs (see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/outlines/{id}": {
+      "get": {
+        "summary": "Read a tree, with its errors, warnings and drafting progress.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Outline"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace the draft tree.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceOutlineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Outline"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "outline_not_confirmed / outline_frozen / upload_incomplete / wrong_state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/outlines/{id}/confirm": {
+      "post": {
+        "summary": "Freeze the tree. Refused while it has errors.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Outline"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "outline_not_confirmed / outline_frozen / upload_incomplete / wrong_state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "outline_invalid / idempotency_mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents": {
+      "post": {
+        "summary": "Run a book against a confirmed tree.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Run a create at most once per key (24 hours); a repeat returns the same object as it is now.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocumentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "insufficient_credits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not_entitled / forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "outline_not_confirmed / outline_frozen / upload_incomplete / wrong_state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "gone (expired after 30 days)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "too_large (800 pages or 500 MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "unsupported_file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too_many_jobs (see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{id}": {
+      "get": {
+        "summary": "The document: its status, then its latest revision's result.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "gone (expired after 30 days)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{id}/offset": {
+      "post": {
+        "summary": "Confirm or correct where printed page numbers start.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmOffsetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "outline_not_confirmed / outline_frozen / upload_incomplete / wrong_state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "gone (expired after 30 days)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{id}/revisions": {
+      "post": {
+        "summary": "Save review's fixes as the next revision (made on `base_revision`).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Run a create at most once per key (24 hours); a repeat returns the same object as it is now.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "outline_not_confirmed / outline_frozen / upload_incomplete / wrong_state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "gone (expired after 30 days)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{id}/export": {
+      "get": {
+        "summary": "The latest revision as JSON, Excel, a Word sheet or a PDF sheet.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "json (default) | xlsx | docx | pdf",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "xlsx",
+                "docx",
+                "pdf"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file, as an attachment."
+          },
+          "400": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "outline_not_confirmed / outline_frozen / upload_incomplete / wrong_state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "gone (expired after 30 days)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "summary": "The page-credit balance and ledger.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhook_secret": {
+      "get": {
+        "summary": "The secret webhook signatures are made with.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not_entitled / forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions": {
+      "post": {
+        "summary": "A one-time link to Engines' page, scoped to one outline or document.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not_entitled / forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "document": {
+      "post": {
+        "summary": "Sent when a document ends and at each new review revision. Signed: `Engines-Signature: t=<unix>,v1=<hex HMAC-SHA256 of '<t>.<raw body>'>` with the webhook secret.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Any 2xx within 10 seconds."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Outline": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "const": "outline"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "confirmed",
+              "in_use"
+            ]
+          },
+          "drafting": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "running",
+                      "done",
+                      "failed"
+                    ]
+                  },
+                  "pages": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "pages_read": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "failures": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "page": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "page",
+                        "reason"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "status",
+                  "pages",
+                  "pages_read",
+                  "failures"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_pages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "page": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "image_url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "page",
+                "image_url"
+              ]
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutlineNode"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "missing_range",
+                    "inverted_range",
+                    "outside_parent",
+                    "sibling_overlap",
+                    "multiple_answer_keys",
+                    "duplicate_id",
+                    "gap"
+                  ]
+                },
+                "node_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "node_id",
+                "message"
+              ]
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "missing_range",
+                    "inverted_range",
+                    "outside_parent",
+                    "sibling_overlap",
+                    "multiple_answer_keys",
+                    "duplicate_id",
+                    "gap"
+                  ]
+                },
+                "node_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "node_id",
+                "message"
+              ]
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "status",
+          "drafting",
+          "source_pages",
+          "nodes",
+          "errors",
+          "warnings",
+          "created_at",
+          "expires_at"
+        ]
+      },
+      "OutlineNode": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "printed_pages": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "to": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "from",
+                  "to"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "content",
+              "answer_key"
+            ]
+          },
+          "external_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutlineNode"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "level",
+          "printed_pages",
+          "kind",
+          "external_ref",
+          "children"
+        ]
+      },
+      "OutlineNodeInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "printed_pages": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "to": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "from",
+                  "to"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "content",
+              "answer_key"
+            ]
+          },
+          "external_ref": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutlineNodeInput"
+            }
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "CreateOutlineRequest": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "manual"
+                  },
+                  "nodes": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/OutlineNodeInput"
+                    }
+                  }
+                },
+                "required": [
+                  "type",
+                  "nodes"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "pdf"
+                  },
+                  "upload_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "upload_id"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "images"
+                  },
+                  "upload_ids": {
+                    "minItems": 1,
+                    "maxItems": 30,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "type",
+                  "upload_ids"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "book_pages"
+                  },
+                  "upload_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "from": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "to": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "type",
+                  "upload_id",
+                  "from",
+                  "to"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "ReplaceOutlineRequest": {
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutlineNodeInput"
+            }
+          }
+        },
+        "required": [
+          "nodes"
+        ]
+      },
+      "Document": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "const": "document"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "questions",
+              "explanation",
+              "both"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "rendering",
+              "awaiting_offset",
+              "processing",
+              "completed",
+              "completed_with_errors",
+              "failed"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "outline_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "object",
+            "properties": {
+              "pages_total": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "pages_read": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "pages_total",
+              "pages_read"
+            ]
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "pages": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Pages billed: the pages read, written when the job ends"
+              }
+            },
+            "required": [
+              "pages"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "offset": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "printed_from": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "pdf_from": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "confirmed": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "printed_from",
+                "pdf_from",
+                "confirmed"
+              ]
+            }
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "description": "same_file_processed | …"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "document_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "processed_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "code",
+                  "message",
+                  "document_id",
+                  "processed_at"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offset_agreement": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "stimuli": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "passage",
+                    "diagram",
+                    "table"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "pages": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "image": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "pdf_page": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "pdf_page"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "text",
+                "node_id",
+                "pages",
+                "image"
+              ]
+            }
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "multiple_choice",
+                    "fill_blank",
+                    "true_false"
+                  ]
+                },
+                "number": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "text"
+                    ]
+                  }
+                },
+                "correct": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "accepted_answers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "answer_source": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "book",
+                        "marked",
+                        "model",
+                        "review"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "node_path": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "external_ref": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "stimulus_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "locator": {
+                  "type": "object",
+                  "properties": {
+                    "pdf_page": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "printed_page": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "pdf_page",
+                    "printed_page"
+                  ]
+                },
+                "idea_tag": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "math_direction": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "ltr",
+                        "rtl"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "image": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "pdf_page": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "pdf_page"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "review_required": {
+                  "type": "boolean"
+                },
+                "review_reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "grouping_uncertain | cut_off | model_answer | heading_not_found | latex_invalid | … (clients treat unknown reasons as a generic flag)"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "confidence": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "type",
+                "number",
+                "text",
+                "options",
+                "correct",
+                "accepted_answers",
+                "answer_source",
+                "node_id",
+                "node_path",
+                "external_ref",
+                "stimulus_id",
+                "locator",
+                "idea_tag",
+                "math_direction",
+                "image",
+                "review_required",
+                "review_reason",
+                "confidence"
+              ]
+            }
+          },
+          "explanation": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "node_path": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "external_ref": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "heading": {
+                  "type": "string"
+                },
+                "markdown": {
+                  "type": "string"
+                },
+                "math_direction": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "ltr",
+                        "rtl"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "figures": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string"
+                      },
+                      "pdf_page": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "url",
+                      "pdf_page"
+                    ]
+                  }
+                },
+                "pages": {
+                  "type": "object",
+                  "properties": {
+                    "pdf": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "printed": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    }
+                  },
+                  "required": [
+                    "pdf",
+                    "printed"
+                  ]
+                },
+                "review_required": {
+                  "type": "boolean"
+                },
+                "review_reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "grouping_uncertain | cut_off | model_answer | heading_not_found | latex_invalid | … (clients treat unknown reasons as a generic flag)"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "node_id",
+                "node_path",
+                "external_ref",
+                "heading",
+                "markdown",
+                "math_direction",
+                "figures",
+                "pages",
+                "review_required",
+                "review_reason"
+              ]
+            }
+          },
+          "skipped": {
+            "type": "object",
+            "properties": {
+              "neither": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "off_type": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "neither",
+              "off_type"
+            ]
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "description": "unmapped_page | offset_break | image_unreadable | incomplete_question | part_failed (clients treat unknown reasons as a generic failure)"
+                },
+                "locator": {
+                  "type": "object",
+                  "properties": {
+                    "pdf_page": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "printed_page": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "pdf_page",
+                    "printed_page"
+                  ]
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "page_image": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "pdf_page": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "pdf_page"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "reason",
+                "locator",
+                "detail",
+                "page_image"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "type",
+          "status",
+          "revision",
+          "outline_id",
+          "created_at",
+          "expires_at",
+          "progress",
+          "usage",
+          "error",
+          "offset",
+          "warning",
+          "offset_agreement",
+          "stimuli",
+          "questions",
+          "skipped",
+          "failures"
+        ]
+      },
+      "CreateDocumentRequest": {
+        "type": "object",
+        "properties": {
+          "outline_id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "questions",
+              "explanation",
+              "both"
+            ]
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "upload_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "upload_id"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "upload_ids": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "upload_ids"
+                ]
+              }
+            ]
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "ar",
+              "en"
+            ]
+          },
+          "offset": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "confirm"
+            ]
+          },
+          "webhook_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "outline_id",
+          "type",
+          "source"
+        ]
+      },
+      "CreatedDocument": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "const": "document"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "rendering",
+              "awaiting_offset",
+              "processing",
+              "completed",
+              "completed_with_errors",
+              "failed"
+            ]
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "description": "same_file_processed | …"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "document_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "processed_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "code",
+                  "message",
+                  "document_id",
+                  "processed_at"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "status",
+          "warning"
+        ]
+      },
+      "ConfirmOffsetRequest": {
+        "type": "object",
+        "properties": {
+          "segments": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "printed_from": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "pdf_from": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "printed_from",
+                "pdf_from"
+              ]
+            }
+          }
+        }
+      },
+      "CreateRevisionRequest": {
+        "type": "object",
+        "properties": {
+          "base_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "changes": {
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Change"
+            }
+          }
+        },
+        "required": [
+          "base_revision",
+          "changes"
+        ]
+      },
+      "Change": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "const": "edit_question"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "multiple_choice",
+                  "fill_blank",
+                  "true_false"
+                ]
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "text"
+                  ]
+                }
+              },
+              "correct": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "accepted_answers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "op",
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "const": "accept_answer"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "op",
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "const": "set_stimulus"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "stimulus_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "op",
+              "id",
+              "stimulus_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "const": "move"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "node_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "op",
+              "id",
+              "node_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "const": "delete"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "op",
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "const": "edit_chunk"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "heading": {
+                "type": "string"
+              },
+              "markdown": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "const": "recrop"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "figure": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "box": {
+                "$ref": "#/components/schemas/CropBox"
+              }
+            },
+            "required": [
+              "op",
+              "id",
+              "box"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "const": "place_block"
+              },
+              "pdf_page": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "block_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "node_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "op",
+              "pdf_page",
+              "block_id",
+              "node_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "const": "dismiss_failure"
+              },
+              "index": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "op",
+              "index"
+            ]
+          }
+        ]
+      },
+      "CropBox": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "y": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "w": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "h": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "w",
+          "h"
+        ]
+      },
+      "CreateUploadRequest": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "application/pdf",
+              "image/jpeg",
+              "image/png",
+              "image/webp"
+            ]
+          },
+          "size": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "filename",
+          "content_type",
+          "size"
+        ]
+      },
+      "Upload": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "const": "upload"
+          },
+          "upload_url": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "const": "PUT"
+          },
+          "expires_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "upload_url",
+          "method",
+          "expires_at"
+        ]
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "usage"
+          },
+          "balance": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "ledger": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "grant",
+                    "hold",
+                    "release",
+                    "usage"
+                  ]
+                },
+                "pages": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "document_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "note": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "pages",
+                "document_id",
+                "note",
+                "created_at"
+              ]
+            }
+          }
+        },
+        "required": [
+          "object",
+          "balance",
+          "ledger"
+        ]
+      },
+      "WebhookSecret": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "webhook_secret"
+          },
+          "secret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "secret"
+        ]
+      },
+      "WebhookPayload": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "const": "document"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "rendering",
+              "awaiting_offset",
+              "processing",
+              "completed",
+              "completed_with_errors",
+              "failed"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "status",
+          "revision"
+        ]
+      },
+      "CreateSessionRequest": {
+        "type": "object",
+        "properties": {
+          "outline_id": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "return_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "webhook_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "return_url"
+        ]
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "session"
+          },
+          "url": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "url",
+          "expires_at"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    }
+  }
+}

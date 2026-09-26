@@ -1,0 +1,350 @@
+import { serveStatic } from "@hono/node-server/serve-static";
+import { Hono, type Context } from "hono";
+import type { PgBoss } from "pg-boss";
+import { balance, ledger } from "../accounts/credits.ts";
+import type { Auth } from "../accounts/auth.ts";
+import { authenticateKey, type Caller } from "../accounts/keys.ts";
+import { memberRole, sessionCaller } from "../accounts/sessions.ts";
+import {
+  ConfirmOffsetRequest,
+  CreateDocumentRequest,
+} from "../contract/document.ts";
+import { CreateRevisionRequest } from "../contract/revision.ts";
+import { reviseDocument } from "../review/revise.ts";
+import {
+  CreateOutlineRequest,
+  ReplaceOutlineRequest,
+} from "../contract/outline.ts";
+import { createDocument, type Created } from "../documents/create.ts";
+import { documentView, liveDocument } from "../documents/store.ts";
+import { startOutline } from "../outline/start.ts";
+import {
+  confirmOutline,
+  getOutline,
+  outlineView,
+  replaceOutline,
+} from "../outline/store.ts";
+import { normaliseTree } from "../outline/tree.ts";
+import { confirmOffset } from "../pipeline/pipeline.ts";
+import type { Clock } from "../shared/clock.ts";
+import type { Db } from "../shared/db/pool.ts";
+import { Refusal } from "../shared/refusal.ts";
+import type { BlobStore } from "../storage/store.ts";
+import type { TargetPolicy } from "../webhooks/target.ts";
+import { CreateUploadRequest, createUpload } from "../uploads/uploads.ts";
+import { webhookSecret } from "../webhooks/deliver.ts";
+import {
+  EXPORT_FORMATS,
+  exportDocument,
+  type ExportFormat,
+} from "../exports/export.ts";
+import { chromiumPath } from "../exports/pdf.ts";
+import { errorResponse, readBody, unauthorized } from "./errors.ts";
+import { adminRoutes } from "./admin.ts";
+import { API_VERSION, openApi } from "./openapi.ts";
+import { pageRoutes } from "./page.ts";
+import { checkVisit } from "./visit-scope.ts";
+import { createLink } from "../accounts/visits.ts";
+import { CreateSessionRequest } from "../contract/misc.ts";
+import { checkWebhookUrl } from "../webhooks/target.ts";
+import { allowedOrigins, readSession } from "./page-session.ts";
+import {
+  IDEMPOTENCY_HEADER,
+  withIdempotency,
+  type Stored,
+} from "./idempotency.ts";
+
+export interface AppDeps {
+  db: Db;
+  boss: PgBoss;
+  store: BlobStore & { routes?: Hono };
+  clock: Clock;
+  webhooks: TargetPolicy;
+  /** The Chromium binary for PDF exports; found on the usual paths when unset. */
+  chromiumPath?: string | undefined;
+  /** Sign-in on Engines' page. */
+  auth: Auth;
+  /** The built page (web/dist), served at `/` when set. */
+  webDir?: string | undefined;
+}
+
+interface Env {
+  Variables: { caller: Caller };
+}
+
+export function createApp(deps: AppDeps): Hono {
+  const app = new Hono();
+  const { db, store, clock } = deps;
+
+  app.onError((error, c) => errorResponse(c, error));
+
+  app.get("/v1/health", (c) => c.json({ status: "ok" }));
+
+  if (store.routes) app.route("/local-storage", store.routes);
+
+  const { auth } = deps;
+  const session = {
+    auth,
+    db,
+    origins: allowedOrigins(auth.options.baseURL, auth.options.trustedOrigins),
+    clock,
+  };
+  app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+  app.route("/page/admin", adminRoutes(session));
+  app.route(
+    "/page",
+    pageRoutes({
+      ...session,
+      store,
+      clock,
+      google: auth.options.socialProviders !== undefined,
+    }),
+  );
+
+  // The API described (E-21), from the same schemas the routes check with.
+  const spec = openApi(API_VERSION);
+  app.get("/v1/openapi.json", (c) => c.json(spec));
+
+  // An API key when one is sent; otherwise the person signed in to the page,
+  // acting for their organisation.
+  const v1 = new Hono<Env>();
+  v1.use(async (c, next) => {
+    const authorization = c.req.header("authorization");
+    let caller: Caller | null = null;
+    if (authorization !== undefined) {
+      caller = await authenticateKey(db, authorization);
+    } else {
+      const signedIn = await readSession(session, c);
+      if (signedIn) caller = await sessionCaller(db, signedIn);
+    }
+    if (!caller) return unauthorized(c);
+    if (caller.visit) await checkVisit(db, caller.visit, c);
+    c.set("caller", caller);
+    return next();
+  });
+
+  // Another platform sends its person to the page (E-21). Only API keys make
+  // links: a visit can't make another, nor can the page.
+  v1.post("/sessions", async (c) => {
+    const { caller } = c.var;
+    if (caller.userId !== null || caller.visit)
+      throw new Refusal("forbidden", "Session links are made with an API key.");
+    const body = await readBody(c, CreateSessionRequest);
+    if (body.webhook_url !== undefined)
+      checkWebhookUrl(body.webhook_url, deps.webhooks);
+    const { token, expiresAt } = await createLink(db, clock, {
+      orgId: caller.orgId,
+      apiKeyId: caller.apiKeyId,
+      outlineId: body.outline_id ?? null,
+      documentId: body.document_id ?? null,
+      returnUrl: body.return_url,
+      webhookUrl: body.webhook_url ?? null,
+    });
+    return c.json(
+      {
+        object: "session",
+        url: `${new URL(auth.options.baseURL).origin}/page/enter?token=${token}`,
+        expires_at: expiresAt.toISOString(),
+      },
+      201,
+    );
+  });
+
+  v1.post("/uploads", async (c) => {
+    const body = await readBody(c, CreateUploadRequest);
+    const upload = await createUpload(
+      db,
+      store,
+      clock,
+      c.var.caller.orgId,
+      body,
+    );
+    return c.json(upload, 201);
+  });
+
+  /** Runs a create at most once per Idempotency-Key (24 h). */
+  const once = (
+    c: Context<Env>,
+    route: string,
+    body: unknown,
+    run: () => Promise<Stored>,
+  ) =>
+    withIdempotency(
+      db,
+      clock,
+      {
+        orgId: c.var.caller.orgId,
+        key: c.req.header(IDEMPOTENCY_HEADER),
+        route,
+        body,
+      },
+      run,
+    );
+
+  v1.post("/outlines", async (c) => {
+    const body = await readBody(c, CreateOutlineRequest);
+    const response = await once(c, "POST /v1/outlines", body, async () => {
+      const outline = await startOutline(deps, c.var.caller, body);
+      return { status: 201, body: await outlineView(store, outline) };
+    });
+    // A repeat returns the outline as it is now (drafting moves on).
+    if (response.replayed) {
+      const { id } = response.body as { id: string };
+      return c.json(await currentOutline(c.var.caller.orgId, id), 201);
+    }
+    return c.json(response.body, response.status as 201);
+  });
+
+  const currentOutline = async (orgId: string, id: string) => {
+    const outline = await getOutline(db, orgId, id);
+    if (!outline) throw new Refusal("not_found", `No outline ${id}.`);
+    return outlineView(store, outline);
+  };
+
+  v1.get("/outlines/:id", async (c) =>
+    c.json(await currentOutline(c.var.caller.orgId, c.req.param("id"))),
+  );
+
+  v1.put("/outlines/:id", async (c) => {
+    const body = await readBody(c, ReplaceOutlineRequest);
+    const outline = await replaceOutline(
+      db,
+      clock,
+      c.var.caller.orgId,
+      c.req.param("id"),
+      normaliseTree(body.nodes),
+    );
+    return c.json(await outlineView(store, outline));
+  });
+
+  v1.post("/outlines/:id/confirm", async (c) => {
+    const outline = await confirmOutline(
+      db,
+      clock,
+      c.var.caller.orgId,
+      c.req.param("id"),
+    );
+    return c.json(await outlineView(store, outline));
+  });
+
+  v1.post("/documents", async (c) => {
+    const sent = await readBody(c, CreateDocumentRequest);
+    // A visit's documents report to the webhook its link named, never one
+    // the page sends.
+    const { visit } = c.var.caller;
+    const body = { ...sent };
+    if (visit) {
+      delete body.webhook_url;
+      if (visit.webhookUrl) body.webhook_url = visit.webhookUrl;
+    }
+    const response = await once(c, "POST /v1/documents", body, async () => ({
+      status: 202,
+      body: await createDocument(deps, c.var.caller, body),
+    }));
+    // A repeat returns the original document as it is now, not as it was.
+    if (response.replayed) {
+      const created = response.body as Created;
+      const row = await liveDocument(db, c.var.caller.orgId, created.id);
+      return c.json({ ...created, status: row.status }, 202);
+    }
+    return c.json(response.body, response.status as 202);
+  });
+
+  v1.get("/usage", async (c) => {
+    const { orgId } = c.var.caller;
+    return c.json({
+      object: "usage",
+      balance: await balance(db, orgId),
+      ledger: await ledger(db, orgId),
+    });
+  });
+
+  v1.get("/webhook_secret", async (c) => {
+    // It signs every delivery, so on the page it's for those who manage keys.
+    const { orgId, userId } = c.var.caller;
+    if (userId !== null && (await memberRole(db, orgId, userId)) === "member")
+      throw new Refusal(
+        "forbidden",
+        "Only the organisation's owners and admins see the webhook secret.",
+      );
+    return c.json({
+      object: "webhook_secret",
+      secret: await webhookSecret(db, orgId),
+    });
+  });
+
+  v1.post("/documents/:id/offset", async (c) => {
+    const body = await readBody(c, ConfirmOffsetRequest);
+    await confirmOffset(
+      deps,
+      c.var.caller.orgId,
+      c.req.param("id"),
+      body.segments,
+    );
+    const row = await liveDocument(db, c.var.caller.orgId, c.req.param("id"));
+    return c.json(await documentView(db, store, row));
+  });
+
+  // Review's fixes as a new revision (E-18). The reply is the document as it
+  // is now, at its latest revision.
+  v1.post("/documents/:id/revisions", async (c) => {
+    const body = await readBody(c, CreateRevisionRequest);
+    const { orgId, userId } = c.var.caller;
+    const id = c.req.param("id");
+    await once(c, `POST /v1/documents/${id}/revisions`, body, async () => ({
+      status: 201,
+      body: {
+        revision: await reviseDocument(
+          deps,
+          orgId,
+          id,
+          body.base_revision,
+          body.changes,
+          userId,
+        ),
+      },
+    }));
+    const row = await liveDocument(db, orgId, id);
+    return c.json(await documentView(db, store, row), 201);
+  });
+
+  v1.get("/documents/:id/export", async (c) => {
+    const format = c.req.query("format") ?? "json";
+    if (!(EXPORT_FORMATS as readonly string[]).includes(format)) {
+      throw new Refusal(
+        "invalid_request",
+        `format must be one of ${EXPORT_FORMATS.join(", ")}.`,
+      );
+    }
+    const row = await liveDocument(db, c.var.caller.orgId, c.req.param("id"));
+    const file = await exportDocument(
+      { db, store, chromium: () => chromiumPath(deps.chromiumPath) },
+      row,
+      format as ExportFormat,
+    );
+    return c.body(new Uint8Array(file.bytes), 200, {
+      "content-type": file.contentType,
+      "content-disposition": `attachment; filename="${file.filename.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+    });
+  });
+
+  v1.get("/documents/:id", async (c) => {
+    const row = await liveDocument(db, c.var.caller.orgId, c.req.param("id"));
+    return c.json(await documentView(db, store, row));
+  });
+
+  app.route("/v1", v1);
+
+  if (deps.webDir) {
+    const root = deps.webDir;
+    app.use("/assets/*", serveStatic({ root }));
+    // Every other page path is the single-page app's; API paths stay 404.
+    const index = serveStatic({ root, path: "index.html" });
+    app.get("*", (c, next) =>
+      /^\/(v1|api|page|local-storage)(\/|$)/.test(c.req.path)
+        ? next()
+        : index(c, next),
+    );
+  }
+  return app;
+}

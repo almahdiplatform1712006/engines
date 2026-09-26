@@ -1,0 +1,310 @@
+// Routes only Engines' page uses (E-15), behind a sign-in cookie: who's signed
+// in, and the organisation's API keys. Everything else the page does goes
+// through `/v1/` like any customer, or Better Auth's own `/api/auth/` routes.
+import { Hono } from "hono";
+import { z } from "zod";
+import { createApiKey, listKeys, revokeKey } from "../accounts/keys.ts";
+import { strongestRole, type PageSession } from "../accounts/sessions.ts";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { balance } from "../accounts/credits.ts";
+import {
+  endVisit,
+  openLink,
+  VISIT_COOKIE,
+  VISIT_TTL_MS,
+  visitReaches,
+  type Visit,
+} from "../accounts/visits.ts";
+import { CreateDocumentRequest } from "../contract/document.ts";
+import { examineBook } from "../documents/create.ts";
+import { liveDocument } from "../documents/store.ts";
+import type { Clock } from "../shared/clock.ts";
+import type { Db } from "../shared/db/pool.ts";
+import type { PageReading } from "../reading/blocks.ts";
+import type { BlobStore } from "../storage/store.ts";
+import { Refusal } from "../shared/refusal.ts";
+import { readBody, unauthorized } from "./errors.ts";
+import { readSession, type SessionDeps } from "./page-session.ts";
+
+interface Env {
+  Variables: { session: PageSession };
+}
+
+const CreateKeyRequest = z.object({ name: z.string().trim().min(1).max(100) });
+const EstimateRequest = CreateDocumentRequest.pick({ source: true });
+
+/** How long a redirected page image link lasts. */
+const PAGE_URL_SECONDS = 15 * 60;
+
+export function pageRoutes(
+  deps: SessionDeps & {
+    db: Db;
+    store: BlobStore;
+    clock: Clock;
+    google: boolean;
+  },
+): Hono<Env> {
+  const { db, store } = deps;
+  const page = new Hono<Env>();
+
+  // Before sign-in: which ways in the page offers.
+  page.get("/config", (c) => c.json({ google: deps.google }));
+
+  // A one-time link from another platform (E-21): opened once, it becomes a
+  // visit cookie, and the page goes to the visit's outline or document. The
+  // token leaves the URL at once and isn't sent on as a Referer.
+  page.get("/enter", async (c) => {
+    c.header("referrer-policy", "no-referrer");
+    c.header("cache-control", "no-store");
+    const token = c.req.query("token") ?? "";
+    // Someone signed in to Engines would silently become a visitor in another
+    // organisation: ask first (a link could be sent to trick them).
+    if (
+      c.req.query("switch") !== "1" &&
+      (await deps.auth.api.getSession({ headers: c.req.raw.headers }))
+    ) {
+      const next = `/page/enter?token=${encodeURIComponent(token)}&switch=1`;
+      return c.html(
+        `<!doctype html><html dir="rtl" lang="ar"><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
+          `<body style="font-family:system-ui;max-inline-size:32rem;margin:2rem auto;padding-inline:1rem">` +
+          `<p>أنت مسجّل الدخول في إنجنز. هذا الرابط يفتح إنجنز كزائر من منصة أخرى، لمنهج أو كتاب واحد.</p>` +
+          `<p dir="ltr">You're signed in to Engines. This link opens Engines as another platform's visitor, for one outline or book.</p>` +
+          `<p><a href="${next}">متابعة كزائر · Continue as a visitor</a></p>` +
+          `<p><a href="/">البقاء في حسابي · Stay in my account</a></p></body></html>`,
+      );
+    }
+    const opened = await openLink(db, deps.clock, token);
+    if (!opened) {
+      return c.text(
+        "This link has already been used or has expired. Go back and open Engines again.",
+        410,
+      );
+    }
+    const { visit } = opened;
+    setCookie(c, VISIT_COOKIE, opened.cookie, {
+      httpOnly: true,
+      sameSite: "Lax",
+      secure: deps.origins[0]?.startsWith("https:") ?? false,
+      path: "/",
+      maxAge: VISIT_TTL_MS / 1000,
+    });
+    return c.redirect(
+      visit.outlineId
+        ? `/o/${visit.orgId}/outlines/${visit.outlineId}`
+        : `/o/${visit.orgId}/documents/${visit.documentId ?? ""}`,
+      302,
+    );
+  });
+
+  // Leaving a visit ("back" to the platform): the visit ends, and its cookie
+  // goes, so the browser is itself again.
+  page.post("/leave-visit", async (c) => {
+    const origin = c.req.header("origin");
+    if (!origin || !deps.origins.includes(origin))
+      throw new Refusal(
+        "forbidden",
+        "This request must come from Engines' page.",
+      );
+    const cookie = getCookie(c, VISIT_COOKIE);
+    if (cookie) await endVisit(db, deps.clock, cookie);
+    deleteCookie(c, VISIT_COOKIE, { path: "/" });
+    return c.body(null, 204);
+  });
+
+  page.use(async (c, next) => {
+    const session = await readSession(deps, c);
+    if (!session) return unauthorized(c, "Sign in first.");
+    if (session.visit)
+      await checkPageVisit(db, session.visit, c.req.method, c.req.path);
+    c.set("session", session);
+    return next();
+  });
+
+  page.get("/me", async (c) => {
+    const { user, active, visit } = c.var.session;
+    if (visit) {
+      const { rows } = await db.query<{ id: string; name: string }>(
+        "SELECT id, name FROM organisations WHERE id = $1",
+        [visit.orgId],
+      );
+      return c.json({
+        user: null,
+        visit: {
+          return_url: visit.returnUrl,
+          outline_id: visit.outlineId,
+          document_id: visit.documentId,
+        },
+        organisations: rows.map((o) => ({
+          ...o,
+          role: "visitor",
+          entitlements: [],
+        })),
+        active: { id: visit.orgId, role: "visitor" },
+      });
+    }
+    const { rows } = await db.query<{
+      id: string;
+      name: string;
+      role: string;
+      entitlements: string[];
+    }>(
+      `SELECT o.id, o.name, m.role,
+         ARRAY(SELECT e.name FROM entitlements e WHERE e.org_id = o.id ORDER BY e.name) AS entitlements
+       FROM members m JOIN organisations o ON o.id = m.org_id
+       WHERE m.user_id = $1 ORDER BY m.created_at, o.id`,
+      [user.id],
+    );
+    return c.json({
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        super_admin: user.superAdmin,
+      },
+      organisations: rows.map((o) => ({ ...o, role: strongestRole(o.role) })),
+      active: active ? { id: active.orgId, role: active.role } : null,
+    });
+  });
+
+  /** The acting organisation, refusing when the person isn't in one. */
+  const organisation = (session: PageSession, manage = false) => {
+    if (!session.active)
+      throw new Refusal("not_found", "Create or join an organisation first.");
+    if (manage && session.active.role === "member") {
+      throw new Refusal(
+        "forbidden",
+        "Only the organisation's owners and admins manage API keys.",
+      );
+    }
+    return session.active.orgId;
+  };
+
+  page.get("/keys", async (c) => {
+    const orgId = organisation(c.var.session);
+    return c.json({ object: "list", data: await listKeys(db, orgId) });
+  });
+
+  page.post("/keys", async (c) => {
+    const orgId = organisation(c.var.session, true);
+    const { name } = await readBody(c, CreateKeyRequest);
+    const created = await createApiKey(db, orgId, name, c.var.session.user.id);
+    return c.json({ id: created.id, name, key: created.key }, 201);
+  });
+
+  // Before a document is created: what the uploaded book is and costs.
+  page.post("/estimate", async (c) => {
+    const orgId = organisation(c.var.session);
+    const { source } = await readBody(c, EstimateRequest);
+    const book = await examineBook(deps, orgId, source);
+    return c.json({
+      pages: book.pageCount,
+      balance: await balance(db, orgId),
+      warning: book.warning,
+    });
+  });
+
+  page.get("/documents", async (c) => {
+    const orgId = organisation(c.var.session);
+    const { rows } = await db.query<{
+      id: string;
+      type: string;
+      status: string;
+      pages: number | null;
+      pages_read: number;
+      filename: string | null;
+      created_at: Date;
+    }>(
+      `SELECT d.id, d.type, d.status, d.page_count AS pages, d.created_at,
+         (SELECT count(*)::int FROM pages p WHERE p.document_id = d.id AND p.state <> 'pending') AS pages_read,
+         (SELECT u.filename FROM uploads u WHERE u.org_id = d.org_id AND u.document_id = d.id ORDER BY u.created_at, u.id LIMIT 1) AS filename
+       FROM documents d WHERE d.org_id = $1 AND d.expired_at IS NULL
+       ORDER BY d.created_at DESC, d.id LIMIT 200`,
+      [orgId],
+    );
+    return c.json({
+      object: "list",
+      data: rows.map(({ filename, created_at, ...row }) => ({
+        ...row,
+        title: filename?.replace(/\.[^.]+$/, "") ?? row.id,
+        created_at: created_at.toISOString(),
+      })),
+    });
+  });
+
+  // A page of a book, as the pipeline rendered it: thumbnails on the offset
+  // screen and page images in review load straight from here.
+  page.get("/documents/:id/pages/:page", async (c) => {
+    const orgId = organisation(c.var.session);
+    const row = await liveDocument(db, orgId, c.req.param("id"));
+    const pdfPage = Number(c.req.param("page"));
+    if (!Number.isSafeInteger(pdfPage) || pdfPage < 1)
+      throw new Refusal("not_found", "No such page.");
+    const { rows } = await db.query<{ image_key: string }>(
+      "SELECT image_key FROM pages WHERE document_id = $1 AND pdf_page = $2",
+      [row.id, pdfPage],
+    );
+    const key = rows[0]?.image_key;
+    if (!key) throw new Refusal("not_found", "No such page.");
+    c.header("cache-control", "private, max-age=300");
+    return c.redirect(await store.signedUrl(key, PAGE_URL_SECONDS), 302);
+  });
+
+  // The questions the model read on a page, for placing what wasn't placed.
+  page.get("/documents/:id/pages/:page/questions", async (c) => {
+    const orgId = organisation(c.var.session);
+    const row = await liveDocument(db, orgId, c.req.param("id"));
+    const { rows } = await db.query<{ reading: PageReading | null }>(
+      "SELECT reading FROM pages WHERE document_id = $1 AND pdf_page = $2",
+      [row.id, Number(c.req.param("page")) || 0],
+    );
+    const blocks = rows[0]?.reading?.blocks ?? [];
+    return c.json({
+      object: "list",
+      data: blocks
+        .filter((b) => b.kind === "question" && b.question)
+        .map((b) => ({
+          block_id: b.id,
+          number: b.question?.number ?? null,
+          text: b.text,
+        })),
+    });
+  });
+
+  page.delete("/keys/:id", async (c) => {
+    const orgId = organisation(c.var.session, true);
+    if (!(await revokeKey(db, orgId, c.req.param("id")))) {
+      throw new Refusal("not_found", `No key ${c.req.param("id")}.`);
+    }
+    return c.body(null, 204);
+  });
+
+  return page;
+}
+
+/**
+ * A visit on the page reaches who it is, its own document's pages and, when
+ * it can run books on its outline, the estimate.
+ */
+async function checkPageVisit(
+  db: Db,
+  visit: Visit,
+  method: string,
+  path: string,
+): Promise<void> {
+  const route = path.replace(/^\/page/, "");
+  if (route === "/me") return;
+  if (method === "POST" && route === "/estimate" && visit.outlineId !== null)
+    return;
+  const pages = /^\/documents\/([^/]+)\/pages\/[^/]+(\/questions)?$/.exec(
+    route,
+  );
+  if (pages?.[1]) {
+    if (!(await visitReaches(db, visit, { documentId: pages[1] })))
+      throw new Refusal("not_found", "Not found.");
+    return;
+  }
+  throw new Refusal(
+    "forbidden",
+    "A visit reaches only its outline or document.",
+  );
+}
