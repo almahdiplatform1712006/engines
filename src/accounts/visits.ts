@@ -104,6 +104,18 @@ export async function findVisit(
   return row ? toVisit(row) : null;
 }
 
+/** Ends a visit now (the visitor went back), whoever still holds its cookie. */
+export async function endVisit(
+  db: Queryable,
+  clock: Clock,
+  cookie: string,
+): Promise<void> {
+  await db.query(
+    "UPDATE visitor_links SET visit_expires_at = $2 WHERE visit_hash = $1 AND visit_expires_at > $2",
+    [hashKey(cookie), clock()],
+  );
+}
+
 /** Links are kept for a day after they end, then removed by the sweep. */
 export async function removeOldLinks(
   db: Queryable,

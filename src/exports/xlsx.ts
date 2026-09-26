@@ -1,6 +1,7 @@
-// The result as a spreadsheet (E-19): a Questions sheet, a Tree sheet and, for
-// entitled organisations, an Explanation sheet. Sheets read right-to-left when
-// the document is Arabic. Math stays LaTeX, exactly as printed.
+// The result as a spreadsheet (E-19): a Questions sheet, a Tree sheet, an
+// Explanation sheet for entitled organisations, and a Stimuli sheet with the
+// passages and diagrams questions share. Sheets read right-to-left when the
+// document is Arabic. Math stays LaTeX, exactly as printed.
 import ExcelJS from "exceljs";
 import type { OutlineNode } from "../contract/outline.ts";
 import type { ResultBody } from "../assembly/result.ts";
@@ -113,6 +114,27 @@ export async function resultXlsx(input: {
       wrapText: true,
       vertical: "top",
     };
+  }
+
+  // The passages, diagrams and tables questions point at by id.
+  if (input.result.stimuli.length > 0) {
+    const stimuli = book.addWorksheet("Stimuli", { views });
+    stimuli.columns = [
+      { header: "Id", key: "id", width: 14 },
+      { header: "Kind", key: "kind", width: 12 },
+      { header: "Text", key: "text", width: 90 },
+      { header: "PDF pages", key: "pdf", width: 12 },
+    ];
+    header(stimuli);
+    for (const s of input.result.stimuli) {
+      stimuli.addRow({
+        id: s.id,
+        kind: s.kind,
+        text: s.text,
+        pdf: s.pages.join(", "),
+      });
+    }
+    stimuli.getColumn("text").alignment = { wrapText: true, vertical: "top" };
   }
 
   return Buffer.from(await book.xlsx.writeBuffer());

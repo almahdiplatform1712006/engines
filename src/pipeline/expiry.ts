@@ -43,10 +43,13 @@ export async function expire(deps: PipelineDeps): Promise<ExpiryReport> {
         "expired: the job did not finish within 30 days",
       );
     }
-    await deps.store.deletePrefix(`pages/${doc.id}/`);
-    await deps.store.deletePrefix(`results/${doc.id}/`);
-    for (const key of sourceKeys(doc.source)) await deps.store.delete(key);
+    // The tombstone first, under the row's lock, so a review save waits and
+    // then sees it's gone, and GETs and exports answer 410 before anything
+    // is deleted from under them.
     await deps.db.transaction(async (tx) => {
+      await tx.query("SELECT 1 FROM documents WHERE id = $1 FOR UPDATE", [
+        doc.id,
+      ]);
       await tx.query("DELETE FROM revisions WHERE document_id = $1", [doc.id]);
       await tx.query("DELETE FROM tasks WHERE document_id = $1", [doc.id]);
       await tx.query("DELETE FROM pages WHERE document_id = $1", [doc.id]);
@@ -55,6 +58,9 @@ export async function expire(deps: PipelineDeps): Promise<ExpiryReport> {
         now,
       ]);
     });
+    await deps.store.deletePrefix(`pages/${doc.id}/`);
+    await deps.store.deletePrefix(`results/${doc.id}/`);
+    for (const key of sourceKeys(doc.source)) await deps.store.delete(key);
   }
 
   const outlines = await deps.db.query<{ id: string }>(

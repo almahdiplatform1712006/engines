@@ -5,9 +5,10 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { createApiKey, listKeys, revokeKey } from "../accounts/keys.ts";
 import { strongestRole, type PageSession } from "../accounts/sessions.ts";
-import { deleteCookie, setCookie } from "hono/cookie";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { balance } from "../accounts/credits.ts";
 import {
+  endVisit,
   openLink,
   VISIT_COOKIE,
   VISIT_TTL_MS,
@@ -95,15 +96,17 @@ export function pageRoutes(
     );
   });
 
-  // Leaving a visit ("back" to the platform): the visit's cookie goes, so the
-  // browser is itself again.
-  page.post("/leave-visit", (c) => {
+  // Leaving a visit ("back" to the platform): the visit ends, and its cookie
+  // goes, so the browser is itself again.
+  page.post("/leave-visit", async (c) => {
     const origin = c.req.header("origin");
     if (!origin || !deps.origins.includes(origin))
       throw new Refusal(
         "forbidden",
         "This request must come from Engines' page.",
       );
+    const cookie = getCookie(c, VISIT_COOKIE);
+    if (cookie) await endVisit(db, deps.clock, cookie);
     deleteCookie(c, VISIT_COOKIE, { path: "/" });
     return c.body(null, 204);
   });
@@ -278,7 +281,10 @@ export function pageRoutes(
   return page;
 }
 
-/** A visit on the page reaches who it is, the estimate, and its own document's pages. */
+/**
+ * A visit on the page reaches who it is, its own document's pages and, when
+ * it can run books on its outline, the estimate.
+ */
 async function checkPageVisit(
   db: Db,
   visit: Visit,
@@ -286,7 +292,9 @@ async function checkPageVisit(
   path: string,
 ): Promise<void> {
   const route = path.replace(/^\/page/, "");
-  if (route === "/me" || (method === "POST" && route === "/estimate")) return;
+  if (route === "/me") return;
+  if (method === "POST" && route === "/estimate" && visit.outlineId !== null)
+    return;
   const pages = /^\/documents\/([^/]+)\/pages\/[^/]+(\/questions)?$/.exec(
     route,
   );

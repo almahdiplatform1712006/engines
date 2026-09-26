@@ -181,7 +181,7 @@ export const ROUTES: Route[] = [
     path: "/v1/webhook_secret",
     summary: "The secret webhook signatures are made with.",
     ok: { status: 200, schema: "WebhookSecret" },
-    errors: [401],
+    errors: [401, 403],
   },
   {
     method: "post",

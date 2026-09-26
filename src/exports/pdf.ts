@@ -38,9 +38,11 @@ export async function htmlToPdf(
   html: string,
   executablePath: string,
 ): Promise<Buffer> {
+  // A finished print hands its slot straight to the next waiter, so nobody
+  // can slip in between.
   if (printing >= MAX_PRINTING)
     await new Promise<void>((resolve) => waiting.push(resolve));
-  printing++;
+  else printing++;
   try {
     const browser = await chromium.launch({
       executablePath,
@@ -63,7 +65,8 @@ export async function htmlToPdf(
       await browser.close();
     }
   } finally {
-    printing--;
-    waiting.shift()?.();
+    const next = waiting.shift();
+    if (next) next();
+    else printing--;
   }
 }

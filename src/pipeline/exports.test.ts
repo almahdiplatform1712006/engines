@@ -11,7 +11,10 @@ import { startHarness, type Harness } from "../../test/harness.ts";
 import { mcq, modelBlock, page } from "../../test/model.ts";
 import { makePdf } from "../../test/pdf.ts";
 import { zipNames, zipText } from "../../test/zip.ts";
-import { grantEntitlement } from "../accounts/entitlements.ts";
+import {
+  grantEntitlement,
+  revokeEntitlement,
+} from "../accounts/entitlements.ts";
 import type { Document } from "../contract/document.ts";
 import { scriptedReader } from "../reading/scripted.ts";
 
@@ -94,6 +97,21 @@ test("xlsx: questions, tree and explanation sheets, right-to-left", async () => 
     zipNames(bytes).includes("xl/worksheets/sheet3.xml"),
     "an Explanation sheet for an entitled organisation",
   );
+  const workbook = zipText(bytes, "xl/workbook.xml");
+  assert.match(workbook, /name="Stimuli"/, "the stimuli questions point at");
+});
+
+test("revoking the explanation entitlement changes the cached files", async () => {
+  await download("xlsx");
+  await revokeEntitlement(h.db, h.orgId, "explanation");
+  try {
+    const { bytes } = await download("xlsx");
+    assert.doesNotMatch(zipText(bytes, "xl/workbook.xml"), /"Explanation"/);
+  } finally {
+    await grantEntitlement(h.db, h.orgId, "explanation");
+  }
+  const { bytes } = await download("xlsx");
+  assert.match(zipText(bytes, "xl/workbook.xml"), /"Explanation"/);
 });
 
 test("docx: right-to-left, Word equations, the figure, the Arabic font embedded", async () => {
@@ -138,7 +156,7 @@ test("pdf: Arabic text reads in order, with math and the figure", async () => {
 test("a new revision invalidates the cached exports; after expiry, export is 410", async () => {
   await download("docx");
   assert.notEqual(
-    await h.store.size(`results/${doc.id}/exports/r1.docx`),
+    await h.store.size(`results/${doc.id}/exports/r1-explanation.docx`),
     null,
     "cached",
   );
@@ -159,7 +177,7 @@ test("a new revision invalidates the cached exports; after expiry, export is 410
   const { bytes } = await download("docx");
   assert.ok(zipText(bytes, "word/document.xml").includes("سؤال بعد المراجعة"));
   assert.notEqual(
-    await h.store.size(`results/${doc.id}/exports/r2.docx`),
+    await h.store.size(`results/${doc.id}/exports/r2-explanation.docx`),
     null,
   );
 

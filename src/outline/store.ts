@@ -139,6 +139,7 @@ export async function createOutline(
         [id, outline.orgId, page],
       );
     }
+    await keepBook(tx, id);
     await then?.(tx, id);
   });
   return mustGet(db, outline.orgId, id);
@@ -238,14 +239,40 @@ export async function confirmOutline(
       "UPDATE outlines SET status = 'confirmed', confirmed_at = $2, updated_at = $2, expires_at = $3 WHERE id = $1",
       [id, now, addDays(now, OUTLINE_TTL_DAYS)],
     );
+    await keepBook(tx, id);
   });
   return mustGet(db, orgId, id);
 }
 
-/** A confirmed outline becomes in_use when a document runs against it. */
-export async function markInUse(db: Queryable, id: string): Promise<void> {
-  await db.query(
-    "UPDATE outlines SET status = 'in_use' WHERE id = $1 AND status = 'confirmed'",
+/**
+ * A confirmed outline becomes in_use when a document runs against it. The
+ * row's lock keeps the expiry sweep off it until the document is in; an
+ * outline the sweep got to first is gone.
+ */
+export async function markInUse(
+  db: Queryable,
+  clock: Clock,
+  id: string,
+): Promise<void> {
+  const { rows } = await db.query(
+    `UPDATE outlines SET status = 'in_use'
+     WHERE id = $1 AND (status = 'in_use' OR (status = 'confirmed' AND expires_at > $2))
+     RETURNING id`,
+    [id, clock()],
+  );
+  if (rows.length === 0) throw new Refusal("not_found", `No outline ${id}.`);
+}
+
+/**
+ * A book_pages outline's book is the book its document runs on later, so the
+ * upload lasts as long as the outline does.
+ */
+async function keepBook(tx: Queryable, id: string): Promise<void> {
+  await tx.query(
+    `UPDATE uploads u SET expires_at = GREATEST(u.expires_at, o.expires_at)
+     FROM outlines o
+     WHERE o.id = $1 AND o.source->>'type' = 'book_pages'
+       AND u.id = o.source->>'upload_id' AND u.document_id IS NULL`,
     [id],
   );
 }

@@ -205,3 +205,20 @@ test("a draft outline and an unused upload expire", async () => {
   ]);
   assert.equal(rows.length, 0);
 });
+
+test("a book can't start on a confirmed outline that has expired", async () => {
+  const { body } = await request(h.key);
+  now = new Date(now.getTime() + 31 * DAY_MS);
+  const fresh = await request(h.key);
+  const response = await h.call("POST", "/v1/documents", {
+    ...body,
+    source: fresh.body.source,
+  });
+  assert.equal(response.status, 404, await response.clone().text());
+  // And the sweep still removes it.
+  await sweep(h.worker.deps);
+  assert.equal(
+    (await h.call("GET", `/v1/outlines/${body.outline_id}`)).status,
+    404,
+  );
+});

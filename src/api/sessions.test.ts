@@ -348,4 +348,21 @@ test("someone signed in is asked before a link makes them a visitor; leaving end
     left.headers.getSetCookie()[0] ?? "",
     /engines_visit=;.*Max-Age=0/,
   );
+  // The visit is over for whoever still holds its cookie.
+  const replayed = await h.app.request(`${ORIGIN}/v1/outlines/${outlineId}`, {
+    headers: { cookie: visit },
+  });
+  assert.equal(replayed.status, 401);
+});
+
+test("a document link can't estimate books", async () => {
+  const doc = await h.runBook({
+    pdf: makePdf(["one"]),
+    nodes: [{ name: "L", printed_pages: { from: 1, to: 1 } }],
+  });
+  const { cookie } = await open((await link({ document_id: doc.id })).url);
+  const estimate = await visitor(cookie)("POST", "/page/estimate", {
+    source: { upload_id: "upl_x" },
+  });
+  assert.equal(estimate.status, 403);
 });

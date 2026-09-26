@@ -162,6 +162,12 @@ describe("drafting a tree", () => {
       (await h.call("POST", `/v1/outlines/${outline.id}/confirm`)).status,
       200,
     );
+    // The book waits for the outline, not the 2 days of an unused upload.
+    const { rows } = await h.db.query<{ kept: boolean }>(
+      "SELECT u.expires_at >= o.expires_at AS kept FROM uploads u, outlines o WHERE u.id = $1 AND o.id = $2",
+      [book, outline.id],
+    );
+    assert.equal(rows[0]?.kept, true);
     const document = await h.call("POST", "/v1/documents", {
       outline_id: outline.id,
       type: "questions",

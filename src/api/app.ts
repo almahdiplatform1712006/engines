@@ -4,7 +4,7 @@ import type { PgBoss } from "pg-boss";
 import { balance, ledger } from "../accounts/credits.ts";
 import type { Auth } from "../accounts/auth.ts";
 import { authenticateKey, type Caller } from "../accounts/keys.ts";
-import { sessionCaller } from "../accounts/sessions.ts";
+import { memberRole, sessionCaller } from "../accounts/sessions.ts";
 import {
   ConfirmOffsetRequest,
   CreateDocumentRequest,
@@ -260,9 +260,16 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   v1.get("/webhook_secret", async (c) => {
+    // It signs every delivery, so on the page it's for those who manage keys.
+    const { orgId, userId } = c.var.caller;
+    if (userId !== null && (await memberRole(db, orgId, userId)) === "member")
+      throw new Refusal(
+        "forbidden",
+        "Only the organisation's owners and admins see the webhook secret.",
+      );
     return c.json({
       object: "webhook_secret",
-      secret: await webhookSecret(db, c.var.caller.orgId),
+      secret: await webhookSecret(db, orgId),
     });
   });
 

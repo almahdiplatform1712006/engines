@@ -163,7 +163,7 @@ describe("organisations are walled off", () => {
     );
   });
 
-  test("a member can't manage keys; owners can", async () => {
+  test("a member can't manage keys or see the webhook secret; owners can", async () => {
     const owner = await signUp(h, "owner-c@example.com");
     const orgId = await newOrganisation(owner, "Org C");
     const invitation = await owner.json<{ id: string }>(
@@ -186,6 +186,9 @@ describe("organisations are walled off", () => {
       (await member.send("POST", "/page/keys", { name: "nope" })).status,
       403,
     );
+    assert.equal((await member.send("GET", "/v1/webhook_secret")).status, 403);
+    owner.actFor(orgId);
+    assert.equal((await owner.send("GET", "/v1/webhook_secret")).status, 200);
   });
 
   test("organisations can't be deleted from the page", async () => {

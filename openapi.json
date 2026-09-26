@@ -883,6 +883,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "not_entitled / forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }

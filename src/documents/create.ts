@@ -72,6 +72,8 @@ export async function createDocument(
   const status = await db.transaction(async (tx) => {
     // 429 when the key's queue is full; holds the key's lock until commit.
     await checkQueueRoom(tx, caller.apiKeyId);
+    // Before the insert: keeps the expiry sweep off the outline.
+    await markInUse(tx, clock, outline.id);
     await tx.query(
       `INSERT INTO documents
          (id, org_id, api_key_id, outline_id, type, language, status, source, webhook_url,
@@ -96,7 +98,6 @@ export async function createDocument(
     await claimUploads(tx, id, uploadIds);
     // 402 when the balance can't cover the book.
     await holdCredits(tx, caller.orgId, id, pageCount);
-    await markInUse(tx, outline.id);
     await admit(deps.boss, tx, caller.apiKeyId);
     const { rows } = await tx.query<{ status: string }>(
       "SELECT status FROM documents WHERE id = $1",

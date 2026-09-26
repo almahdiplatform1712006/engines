@@ -70,16 +70,17 @@ export async function exportDocument(
   const latest = await latestResult(deps.db, row.id);
   if (!latest)
     throw new Refusal("wrong_state", `Document ${row.id} has no result yet.`);
-  const cacheKey = `results/${row.id}/exports/r${String(latest.number)}.${format}`;
+  const withExplanation =
+    row.type !== "questions" &&
+    (await hasEntitlement(deps.db, row.org_id, "explanation"));
+  // The entitlement can change without a new revision, so it's in the key.
+  const cacheKey = `results/${row.id}/exports/r${String(latest.number)}${withExplanation ? "-explanation" : ""}.${format}`;
   if ((await deps.store.size(cacheKey)) !== null) {
     return { bytes: await deps.store.get(cacheKey), contentType, filename };
   }
 
   const outline = await getOutline(deps.db, row.org_id, row.outline_id);
   const tree = outline?.nodes ?? [];
-  const withExplanation =
-    row.type !== "questions" &&
-    (await hasEntitlement(deps.db, row.org_id, "explanation"));
   const worksheet = buildWorksheet({
     title,
     language: row.language,
