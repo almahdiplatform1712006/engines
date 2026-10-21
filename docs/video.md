@@ -9,6 +9,13 @@ npm run video -- lesson.json --dry --out lesson.mp4   # silent voice, no model c
 npm run video -- lesson.json --out lesson.mp4         # real voice
 ```
 
+A ready lesson with all four scene types is in `examples/video/`:
+
+```sh
+npm run video -- --models                                  # voice models on OpenRouter; pick one for TTS_MODEL
+npm run video -- examples/video/lesson.json --out first.mp4
+```
+
 The real voice needs `OPENROUTER_API_KEY` and `TTS_MODEL` (and optionally `TTS_VOICE`, `TTS_STYLE`) in `.env`. It needs Chromium (`CHROMIUM_PATH` if it isn't on the usual paths) and FFmpeg. Figure images are files next to the script.
 
 Rendering one scene takes about 15 s on 2 CPUs; a scene that has not changed is reused from `--work` (`.data/video`).

@@ -1,6 +1,7 @@
 // npm run video -- <lesson.json> [--out lesson.mp4] [--work .data/video] [--dry]
 // npm run video -- --lesson <lesson_id> --org <org_id> [--dry]
 // Renders a lesson to an MP4. `--dry` voices it with silence (no model call).
+// npm run video -- --models        lists OpenRouter's voice (audio-output) models, to set TTS_MODEL
 // With `--lesson` the script comes from the database and the MP4 is attached
 // to the lesson, which must have passed its checks.
 import { mkdir, readFile } from "node:fs/promises";
@@ -32,9 +33,11 @@ async function main(argv: string[]): Promise<number> {
       work: { type: "string", default: ".data/video" },
       dry: { type: "boolean", default: false },
       lesson: { type: "string" },
+      models: { type: "boolean", default: false },
       org: { type: "string" },
     },
   });
+  if (values.models) return listVoiceModels();
   const [file] = positionals;
   const stored = values.lesson !== undefined;
   if (stored ? values.org === undefined : !file) {
@@ -147,6 +150,20 @@ async function render(
     console.log(`attached to ${stored.lessonId}`);
   }
   return result.failures.length > 0 ? 1 : 0;
+}
+
+/** OpenRouter's models that can answer with audio: the candidates for TTS_MODEL. */
+async function listVoiceModels(): Promise<number> {
+  const response = await fetch(
+    "https://openrouter.ai/api/v1/models?output_modalities=audio",
+  );
+  if (!response.ok) {
+    console.error(`OpenRouter answered ${String(response.status)}.`);
+    return 1;
+  }
+  const { data } = (await response.json()) as { data: { id: string }[] };
+  for (const model of data) console.log(model.id);
+  return 0;
 }
 
 process.exitCode = await main(process.argv.slice(2));
