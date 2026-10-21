@@ -331,6 +331,200 @@ export type Session = {
   expires_at: string;
 };
 
+export type CreateLessonRequest = {
+  script: {
+    schema_version: 1;
+    title: string;
+    voice?: string;
+    scenes: ({
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "title";
+      title: string;
+      subtitle?: string;
+    } | {
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "bullets";
+      title: string;
+      bullets: string[];
+    } | {
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "figure";
+      title: string;
+      image: string;
+      callouts?: string[];
+    } | {
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "equation_steps";
+      title: string;
+      steps: {
+        latex: string;
+        note?: string;
+      }[];
+      rtl?: boolean;
+    })[];
+  };
+};
+
+export type ReplaceLessonRequest = {
+  script: {
+    schema_version: 1;
+    title: string;
+    voice?: string;
+    scenes: ({
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "title";
+      title: string;
+      subtitle?: string;
+    } | {
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "bullets";
+      title: string;
+      bullets: string[];
+    } | {
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "figure";
+      title: string;
+      image: string;
+      callouts?: string[];
+    } | {
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "equation_steps";
+      title: string;
+      steps: {
+        latex: string;
+        note?: string;
+      }[];
+      rtl?: boolean;
+    })[];
+  };
+};
+
+export type Lesson = {
+  id: string;
+  object: "lesson";
+  title: string;
+  status: "draft" | "auto_checked" | "in_review" | "approved" | "published";
+  script: {
+    schema_version: 1;
+    title: string;
+    voice?: string;
+    scenes: ({
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "title";
+      title: string;
+      subtitle?: string;
+    } | {
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "bullets";
+      title: string;
+      bullets: string[];
+    } | {
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "figure";
+      title: string;
+      image: string;
+      callouts?: string[];
+    } | {
+      id: string;
+      narration: string;
+      narration_tts?: string;
+      source_ref?: {
+        page: number;
+        note?: string;
+      };
+      type: "equation_steps";
+      title: string;
+      steps: {
+        latex: string;
+        note?: string;
+      }[];
+      rtl?: boolean;
+    })[];
+  };
+  findings: {
+    level: "error" | "warning";
+    scene_id?: string;
+    message: string;
+  }[];
+  video: {
+    url: string;
+    seconds: number;
+  } | null;
+  failures: {
+    scene_id: string;
+    reason: string;
+    message: string;
+  }[];
+  created_at: string;
+  updated_at: string;
+};
+
 export type Error = {
   error: {
     code: string;

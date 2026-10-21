@@ -9,6 +9,10 @@ import {
   ConfirmOffsetRequest,
   CreateDocumentRequest,
 } from "../contract/document.ts";
+import {
+  CreateLessonRequest,
+  ReplaceLessonRequest,
+} from "../contract/lesson.ts";
 import { CreateRevisionRequest } from "../contract/revision.ts";
 import { reviseDocument } from "../review/revise.ts";
 import {
@@ -17,6 +21,14 @@ import {
 } from "../contract/outline.ts";
 import { createDocument, type Created } from "../documents/create.ts";
 import { documentView, liveDocument } from "../documents/store.ts";
+import {
+  advance,
+  checkStep,
+  createLesson,
+  getLesson,
+  reject as rejectLesson,
+  replaceScript,
+} from "../video/lessons.ts";
 import { startOutline } from "../outline/start.ts";
 import {
   confirmOutline,
@@ -27,7 +39,7 @@ import {
 import { normaliseTree } from "../outline/tree.ts";
 import { confirmOffset } from "../pipeline/pipeline.ts";
 import type { Clock } from "../shared/clock.ts";
-import type { Db } from "../shared/db/pool.ts";
+import type { Db, Queryable } from "../shared/db/pool.ts";
 import { Refusal } from "../shared/refusal.ts";
 import type { BlobStore } from "../storage/store.ts";
 import type { TargetPolicy } from "../webhooks/target.ts";
@@ -332,6 +344,40 @@ export function createApp(deps: AppDeps): Hono {
     const row = await liveDocument(db, c.var.caller.orgId, c.req.param("id"));
     return c.json(await documentView(db, store, row));
   });
+
+  // Explainer-video lessons: the script, then draft → auto_checked → in_review
+  // → approved → published. The video is rendered by `npm run video`.
+  v1.post("/lessons", async (c) => {
+    const { script } = await readBody(c, CreateLessonRequest);
+    const id = await createLesson(db, clock, c.var.caller.orgId, script);
+    return c.json(await getLesson(db, store, c.var.caller.orgId, id), 201);
+  });
+  v1.get("/lessons/:id", async (c) =>
+    c.json(await getLesson(db, store, c.var.caller.orgId, c.req.param("id"))),
+  );
+  v1.put("/lessons/:id", async (c) => {
+    const { script } = await readBody(c, ReplaceLessonRequest);
+    const { orgId } = c.var.caller;
+    await db.transaction((tx) =>
+      replaceScript(tx, clock, orgId, c.req.param("id"), script),
+    );
+    return c.json(await getLesson(db, store, orgId, c.req.param("id")));
+  });
+  const lessonStep = (
+    name: string,
+    run: (tx: Queryable, orgId: string, id: string) => Promise<void>,
+  ) =>
+    v1.post(`/lessons/:id/${name}`, async (c) => {
+      const { orgId } = c.var.caller;
+      const id = c.req.param("id");
+      await db.transaction((tx) => run(tx, orgId, id));
+      return c.json(await getLesson(db, store, orgId, id));
+    });
+  lessonStep("check", (tx, o, id) => checkStep(tx, clock, o, id));
+  lessonStep("submit", (tx, o, id) => advance(tx, clock, o, id, "submit"));
+  lessonStep("approve", (tx, o, id) => advance(tx, clock, o, id, "approve"));
+  lessonStep("reject", (tx, o, id) => rejectLesson(tx, clock, o, id));
+  lessonStep("publish", (tx, o, id) => advance(tx, clock, o, id, "publish"));
 
   app.route("/v1", v1);
 
