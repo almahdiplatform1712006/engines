@@ -16,6 +16,12 @@ npm run video -- --models                                  # voice models on Ope
 npm run video -- examples/video/lesson.json --out first.mp4
 ```
 
+Set the key without editing files by hand:
+
+```sh
+npm run setup:env        # asks for OPENROUTER_API_KEY (and TTS_MODEL), writes .env
+```
+
 The real voice needs `OPENROUTER_API_KEY` and `TTS_MODEL` (and optionally `TTS_VOICE`, `TTS_STYLE`) in `.env`. It needs Chromium (`CHROMIUM_PATH` if it isn't on the usual paths) and FFmpeg. Figure images are files next to the script.
 
 Rendering one scene takes about 15 s on 2 CPUs; a scene that has not changed is reused from `--work` (`.data/video`).
