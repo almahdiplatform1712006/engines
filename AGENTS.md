@@ -18,28 +18,29 @@ Also from the spec: the model name is config, never hard-coded at a call site. p
 
 ## Layout
 
-| Path             | What                                                                        |
-| ---------------- | --------------------------------------------------------------------------- |
-| `src/api/`       | HTTP service (Hono). `app.ts` builds the app, `main.ts` serves it           |
-| `src/worker/`    | pg-boss worker. `worker.ts` starts the pipeline, `main.ts` runs it          |
-| `src/contract/`  | Zod schemas of every `/v1/` shape                                           |
-| `src/pipeline/`  | The document stage machine: render, per-page reads, finish                  |
-| `src/assembly/`  | Pure: page readings + tree + offset → result (placement lives here)         |
-| `src/reading/`   | The model seam: `PageReader`, the model adapter, the scripted adapter       |
-| `src/offset/`    | Pure: printed ↔ PDF page mapping                                            |
-| `src/outline/`   | Syllabus tree validation and storage                                        |
-| `src/render/`    | poppler (`pdftoppm` → `pdftocairo`) and photo normalisation                 |
-| `src/storage/`   | `BlobStore`: local disk (dev, tests) and Google Cloud Storage               |
-| `src/accounts/`  | Organisations, API keys, sign-in (Better Auth), credits, entitlements       |
-| `src/shared/`    | Config (Zod-parsed env), database pool and migrations, text normalisation   |
-| `web/`           | Engines' page: React + Vite, built to `web/dist` and served by the API      |
-| `src/golden/`    | Golden-set tools: file formats, drafting, correction sheet, scorers         |
-| `golden/`        | Golden-set manifests, truth files and runs. Page images are never committed |
-| `migrations/`    | SQL migrations (node-pg-migrate, `-- Up Migration` / `-- Down Migration`)   |
-| `test/`          | Test harness: Postgres, the whole stack on a scripted reader, PDF builder   |
-| `docs/adr/`      | Architecture decisions. Read `0001` before the pipeline, `0002` before auth |
-| `docs/research/` | Tooling research behind spec §5                                             |
-| `docs/agents/`   | How agents use the issue tracker, labels and domain docs                    |
+| Path             | What                                                                                                      |
+| ---------------- | --------------------------------------------------------------------------------------------------------- |
+| `src/api/`       | HTTP service (Hono). `app.ts` builds the app, `main.ts` serves it                                         |
+| `src/worker/`    | pg-boss worker. `worker.ts` starts the pipeline, `main.ts` runs it                                        |
+| `src/contract/`  | Zod schemas of every `/v1/` shape                                                                         |
+| `src/pipeline/`  | The document stage machine: render, per-page reads, finish                                                |
+| `src/assembly/`  | Pure: page readings + tree + offset → result (placement lives here)                                       |
+| `src/reading/`   | The model seam: `PageReader`, the model adapter, the scripted adapter                                     |
+| `src/offset/`    | Pure: printed ↔ PDF page mapping                                                                          |
+| `src/outline/`   | Syllabus tree validation and storage                                                                      |
+| `src/render/`    | poppler (`pdftoppm` → `pdftocairo`) and photo normalisation                                               |
+| `src/video/`     | Explainer videos: lesson script → narrated Arabic slides → MP4, review states (ADR 0003, `docs/video.md`) |
+| `src/storage/`   | `BlobStore`: local disk (dev, tests) and Google Cloud Storage                                             |
+| `src/accounts/`  | Organisations, API keys, sign-in (Better Auth), credits, entitlements                                     |
+| `src/shared/`    | Config (Zod-parsed env), database pool and migrations, text normalisation                                 |
+| `web/`           | Engines' page: React + Vite, built to `web/dist` and served by the API                                    |
+| `src/golden/`    | Golden-set tools: file formats, drafting, correction sheet, scorers                                       |
+| `golden/`        | Golden-set manifests, truth files and runs. Page images are never committed                               |
+| `migrations/`    | SQL migrations (node-pg-migrate, `-- Up Migration` / `-- Down Migration`)                                 |
+| `test/`          | Test harness: Postgres, the whole stack on a scripted reader, PDF builder                                 |
+| `docs/adr/`      | Architecture decisions. Read `0001` before the pipeline, `0002` before auth, `0003` before video          |
+| `docs/research/` | Tooling research behind spec §5                                                                           |
+| `docs/agents/`   | How agents use the issue tracker, labels and domain docs                                                  |
 
 ## Stack
 

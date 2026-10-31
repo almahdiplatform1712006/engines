@@ -87,6 +87,38 @@ export function readAiConfig(env: Env): AiConfig {
   };
 }
 
+const videoEnv = z.object({
+  OPENROUTER_API_KEY: optional,
+  TTS_MODEL: optional,
+  TTS_VOICE: optional,
+  TTS_STYLE: optional,
+  CHROMIUM_PATH: optional,
+});
+
+export interface VideoConfig {
+  openrouterApiKey: string | undefined;
+  /** The voice model on OpenRouter. Config, never hard-coded at a call site. */
+  ttsModel: string | undefined;
+  ttsVoice: string;
+  /** Direction given to the voice, not read aloud. */
+  ttsStyle: string;
+  chromiumPath: string | undefined;
+}
+
+/** Explainer-video settings. Missing values are only an error when the voice is called. */
+export function readVideoConfig(env: Env): VideoConfig {
+  const e = parse(videoEnv, env);
+  return {
+    openrouterApiKey: e.OPENROUTER_API_KEY,
+    ttsModel: e.TTS_MODEL,
+    ttsVoice: e.TTS_VOICE ?? "ar-eg-commercial-11",
+    ttsStyle:
+      e.TTS_STYLE ??
+      "Read the user's text aloud in clear Egyptian Arabic, in the calm, friendly voice of a teacher. Read it exactly as written.",
+    chromiumPath: e.CHROMIUM_PATH,
+  };
+}
+
 const storageEnv = z.discriminatedUnion("STORAGE", [
   z.object({
     STORAGE: z.literal("local"),

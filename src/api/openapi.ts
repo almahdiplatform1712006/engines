@@ -23,6 +23,11 @@ import {
   OutlineNodeInput,
   ReplaceOutlineRequest,
 } from "../contract/outline.ts";
+import {
+  CreateLessonRequest,
+  Lesson,
+  ReplaceLessonRequest,
+} from "../contract/lesson.ts";
 import { Change, CreateRevisionRequest } from "../contract/revision.ts";
 import { CreateUploadRequest, UploadView } from "../uploads/uploads.ts";
 import { ErrorBody } from "./errors.ts";
@@ -51,6 +56,9 @@ const SCHEMAS = {
   WebhookPayload,
   CreateSessionRequest,
   Session,
+  CreateLessonRequest,
+  ReplaceLessonRequest,
+  Lesson,
   Error: ErrorBody,
 } satisfies Record<string, z.ZodType>;
 type SchemaName = keyof typeof SCHEMAS;
@@ -168,6 +176,66 @@ export const ROUTES: Route[] = [
         enum: ["json", "xlsx", "docx", "pdf"],
       },
     ],
+  },
+  {
+    method: "post",
+    path: "/v1/lessons",
+    summary: "Create a lesson (a script for an explainer video) as a draft.",
+    body: "CreateLessonRequest",
+    ok: { status: 201, schema: "Lesson" },
+    errors: [400, 401],
+  },
+  {
+    method: "get",
+    path: "/v1/lessons/{id}",
+    summary: "The lesson: its state, checks, and the video once rendered.",
+    ok: { status: 200, schema: "Lesson" },
+    errors: [401, 404],
+  },
+  {
+    method: "put",
+    path: "/v1/lessons/{id}",
+    summary:
+      "Replace the script. Sends the lesson back to draft and drops its video.",
+    body: "ReplaceLessonRequest",
+    ok: { status: 200, schema: "Lesson" },
+    errors: [400, 401, 404, 409],
+  },
+  {
+    method: "post",
+    path: "/v1/lessons/{id}/check",
+    summary:
+      "Run the automatic checks: a draft with no error becomes auto_checked.",
+    ok: { status: 200, schema: "Lesson" },
+    errors: [401, 404, 409],
+  },
+  {
+    method: "post",
+    path: "/v1/lessons/{id}/submit",
+    summary: "Send a checked, rendered lesson to review.",
+    ok: { status: 200, schema: "Lesson" },
+    errors: [401, 404, 409],
+  },
+  {
+    method: "post",
+    path: "/v1/lessons/{id}/approve",
+    summary: "Approve a lesson in review.",
+    ok: { status: 200, schema: "Lesson" },
+    errors: [401, 404, 409],
+  },
+  {
+    method: "post",
+    path: "/v1/lessons/{id}/reject",
+    summary: "Send a lesson in review back to draft.",
+    ok: { status: 200, schema: "Lesson" },
+    errors: [401, 404, 409],
+  },
+  {
+    method: "post",
+    path: "/v1/lessons/{id}/publish",
+    summary: "Publish an approved lesson.",
+    ok: { status: 200, schema: "Lesson" },
+    errors: [401, 404, 409],
   },
   {
     method: "get",
